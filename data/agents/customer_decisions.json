@@ -1,0 +1,44 @@
+[
+    {
+        "row_index": 0,
+        "prediction": "Yes",
+        "probability": 0.998774613835729,
+        "risk_level": "HIGH",
+        "decision": "PRIORITY:\nHIGH\n\nRECOMMENDED ACTION:\nReview the customer's recent support interactions and satisfaction feedback to identify specific issues.\n\nRATIONALE:\nThe model evidence directly connects the customer's high support calls (8) and very low satisfaction score (1) to elevated churn risk. This review action targets the observed features with the highest model impact (SHAP values > 0.86) to uncover root causes without assuming causation or introducing monetary interventions.\n\nCAUTION:\nThis recommendation is based solely on the model evidence and does not establish causation or guarantee churn prevention. The SHAP values describe model contributions, not causal relationships, and any intervention outcomes remain uncertain."
+    },
+    {
+        "row_index": 1,
+        "prediction": "No",
+        "probability": 0.07512692155077401,
+        "risk_level": "LOW",
+        "decision": "PRIORITY:\nLOW\n\nRECOMMENDED ACTION:\nReview the customer's satisfaction score and usage hours\n\nRATIONALE:\nThe model evidence shows this customer has a satisfaction score of 4 and usage hours of 34.6, both of which are features associated with lower churn risk. Monitoring these specific metrics ensures continuity of low-risk characteristics without triggering unnecessary interventions.\n\nCAUTION:\nThis recommendation is based solely on the model's evidence of low churn risk and the customer's observed features. The model does not establish causation, and the action does not guarantee churn prevention. This is a monitoring suggestion for human review, not an automatic decision."
+    },
+    {
+        "row_index": 2,
+        "prediction": "Yes",
+        "probability": 0.9954644840278334,
+        "risk_level": "HIGH",
+        "decision": "PRIORITY:\nHIGH\n\nRECOMMENDED ACTION:\nReview the customer's satisfaction and support interaction history to address potential pain points.\n\nRATIONALE:\nModel evidence shows low satisfaction (1) and high support calls (6) as strong predictors of churn (SHAP values: 0.8621 and 0.7438). Reviewing these specific customer features can help identify and resolve issues contributing to the high churn risk.\n\nCAUTION:\nThis recommendation is based on model evidence and does not establish causation or guarantee prevention of churn. The model indicates association with higher churn risk, but the actual cause may be complex and require further investigation."
+    },
+    {
+        "row_index": 3,
+        "prediction": "No",
+        "probability": 0.007195856154292098,
+        "risk_level": "LOW",
+        "decision": "PRIORITY:\nLOW\n\nRECOMMENDED ACTION:\nContinue standard monitoring\n\nRATIONALE:\nThe customer exhibits strong positive indicators for retention (60 months tenure and satisfaction score of 5) with a very low predicted churn probability (0.0072). Given the low risk level, no specific intervention is necessary beyond existing monitoring protocols, as the model confirms these features contribute to reduced churn risk without requiring additional action.\n\nCAUTION:\nThis recommendation is based solely on the model evidence and does not imply causation between features and churn. SHAP values describe the model's contribution to the prediction, not causal relationships. We cannot guarantee that continued monitoring will prevent churn, as churn prevention depends on multiple factors beyond the current prediction."
+    },
+    {
+        "row_index": 4,
+        "prediction": "Yes",
+        "probability": 0.9933119226038808,
+        "risk_level": "HIGH",
+        "decision": "PRIORITY:\nHIGH\n\nRECOMMENDED ACTION:\nReview the customer's recent support interactions and satisfaction feedback to investigate potential root causes\n\nRATIONALE:\nThe model evidence shows the customer has a low satisfaction_score (1) and high support_calls (6), both of which are top contributors to increased churn (SHAP values: 0.8621 and 0.7438). This review action directly addresses the observed risk factors without making causal claims or financial commitments.\n\nCAUTION:\nThis recommendation is based solely on model evidence and does not establish causation between features and churn. The intervention (review) does not guarantee prevention of churn."
+    },
+    {
+        "row_index": 5,
+        "prediction": "No",
+        "probability": 0.011025104804095078,
+        "risk_level": "LOW",
+        "decision": "PRIORITY:\nLOW\n\nRECOMMENDED ACTION:\nContinue standard customer engagement\n\nRATIONALE:\nThe model evidence shows the customer has features (high usage, long tenure, one-year contract) associated with lower churn, and the predicted churn probability is low (0.011). Standard engagement practices align with maintaining this low-risk profile without introducing new interventions.\n\nCAUTION:\nThis recommendation is based solely on model evidence and does not establish causation, guarantee outcomes, or imply that any specific feature directly prevents churn. The customer's low predicted risk and protective features are indicators, not guarantees of continued retention."
+    }
+]
