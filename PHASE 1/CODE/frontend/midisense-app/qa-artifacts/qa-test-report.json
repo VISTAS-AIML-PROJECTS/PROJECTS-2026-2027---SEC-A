@@ -1,0 +1,218 @@
+{
+  "total": 35,
+  "passedCount": 34,
+  "failedCount": 1,
+  "passRate": "97.1",
+  "results": [
+    {
+      "suite": "Suite 1",
+      "testName": "App responds with HTTP 200",
+      "passed": true,
+      "details": "Status: 200"
+    },
+    {
+      "suite": "Suite 1",
+      "testName": "Unauthenticated root visits redirect to /login",
+      "passed": true,
+      "details": "URL: http://localhost:5173/login"
+    },
+    {
+      "suite": "Suite 1",
+      "testName": "Page title is correct",
+      "passed": false,
+      "details": "Title: \"Loading http://localhost:5173/login\""
+    },
+    {
+      "suite": "Suite 2",
+      "testName": "Branding header exists with \"MIDISense\"",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 2",
+      "testName": "Email input field is present & visible",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 2",
+      "testName": "Password field is masked (type=\"password\")",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 2",
+      "testName": "Google OAuth Sign-in button is visible",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 2",
+      "testName": "Submit button has \"Sign In\" text initially",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 3",
+      "testName": "Empty form triggers email validation error",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 3",
+      "testName": "Malformed email triggers validation error",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 3",
+      "testName": "Short password (<6 chars) triggers validation error",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 3",
+      "testName": "Toggle mode switches button to \"Create Account\"",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 3",
+      "testName": "Mode switch clears previous validation errors",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 4",
+      "testName": "Unauthenticated visit to /dashboard redirects to /login",
+      "passed": true,
+      "details": "Landed at: http://localhost:5173/login"
+    },
+    {
+      "suite": "Suite 4",
+      "testName": "Unauthenticated visit to /practice redirects to /login",
+      "passed": true,
+      "details": "Landed at: http://localhost:5173/login"
+    },
+    {
+      "suite": "Suite 4",
+      "testName": "Unauthenticated visit to /lessons redirects to /login",
+      "passed": true,
+      "details": "Landed at: http://localhost:5173/login"
+    },
+    {
+      "suite": "Suite 4",
+      "testName": "Unauthenticated visit to /sequencer redirects to /login",
+      "passed": true,
+      "details": "Landed at: http://localhost:5173/login"
+    },
+    {
+      "suite": "Suite 4",
+      "testName": "Unauthenticated visit to /onboarding redirects to /login",
+      "passed": true,
+      "details": "Landed at: http://localhost:5173/login"
+    },
+    {
+      "suite": "Suite 4",
+      "testName": "Unknown routes redirect cleanly to /login",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 5",
+      "testName": "Authenticated user successfully enters /dashboard",
+      "passed": true,
+      "details": "URL: http://localhost:5173/dashboard"
+    },
+    {
+      "suite": "Suite 5",
+      "testName": "Dashboard displays personalized greeting",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 5",
+      "testName": "Feature navigation cards exist (Practice, Lessons, Sequencer)",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 6",
+      "testName": "Lessons header loads correctly",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 6",
+      "testName": "Lesson curriculum units are populated",
+      "passed": true,
+      "details": "Found 23 units/elements"
+    },
+    {
+      "suite": "Suite 7",
+      "testName": "MIDI Status indicator is rendered",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 7",
+      "testName": "Interactive piano keys rendered",
+      "passed": true,
+      "details": "Detected 60 keys"
+    },
+    {
+      "suite": "Suite 7",
+      "testName": "Piano key interactive click event succeeds",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 7",
+      "testName": "AI Tutor coach panel is rendered",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 8",
+      "testName": "Transport Bar BPM control rendered",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 8",
+      "testName": "Transport Bar playback controls rendered",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 8",
+      "testName": "Piano roll canvas/grid is rendered",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 9",
+      "testName": "Login page fits mobile viewport without horizontal overflow",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 9",
+      "testName": "Dashboard fits mobile viewport without horizontal overflow",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "suite": "Suite 10",
+      "testName": "Zero uncaught JavaScript exceptions (pageerror)",
+      "passed": true,
+      "details": "0 errors"
+    },
+    {
+      "suite": "Suite 10",
+      "testName": "No fatal React rendering or runtime console errors",
+      "passed": true,
+      "details": "0 errors"
+    }
+  ]
+}

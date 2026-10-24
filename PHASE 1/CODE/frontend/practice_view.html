@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MIDISense — Practice View (Phase 1)</title>
+<style>
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f0f1a;
+    color: #eaeaf2;
+    margin: 0;
+    padding: 40px;
+    max-width: 720px;
+  }
+  h1 { color: #8b8bf5; margin-bottom: 4px; }
+  .sub { color: #9a9ab0; margin-bottom: 24px; }
+  .panel {
+    background: #1a1a2e;
+    border: 1px solid #2b2b52;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+  }
+  .status { font-size: 14px; margin-bottom: 10px; }
+  .status.ok { color: #6ee7b7; }
+  .status.warn { color: #fbbf24; }
+  label { font-size: 13px; color: #9a9ab0; display: block; margin-bottom: 4px; }
+  input[type="text"], input[type="number"] {
+    background: #0a0a14; border: 1px solid #2b2b52; color: #eaeaf2;
+    border-radius: 6px; padding: 8px 10px; font-size: 14px; width: 100%;
+    box-sizing: border-box; margin-bottom: 14px;
+  }
+  .row { display: flex; gap: 14px; }
+  .row > div { flex: 1; }
+  button {
+    background: #6d5ff5; color: white; border: none; border-radius: 8px;
+    padding: 10px 18px; font-size: 14px; cursor: pointer; margin-right: 8px;
+  }
+  button.stop { background: #fb7185; }
+  button:disabled { background: #3a3a52; cursor: not-allowed; }
+  #liveNotes {
+    background: #0a0a14; border-radius: 8px; padding: 12px;
+    height: 100px; overflow-y: auto; font-family: monospace; font-size: 12px;
+    color: #6b6b85; margin-top: 10px;
+  }
+  .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+  .metric { background: #0a0a14; border-radius: 8px; padding: 12px; }
+  .metric .label { font-size: 12px; color: #9a9ab0; margin-bottom: 4px; }
+  .metric .value { font-size: 22px; font-weight: 600; }
+  .feedback-line { font-size: 14px; margin-bottom: 8px; padding-left: 8px; border-left: 2px solid #6d5ff5; }
+</style>
+</head>
+<body>
+
+<h1>MIDISense — Practice View</h1>
+<div class="sub">Phase 1: live MIDI capture wired into the real analysis engine.</div>
+
+<div class="panel">
+  <div class="status" id="deviceStatus">Checking for MIDI device…</div>
+
+  <div class="row">
+    <div>
+      <label for="bpmInput">Tempo (BPM)</label>
+      <input type="number" id="bpmInput" value="80" min="30" max="240">
+    </div>
+    <div>
+      <label for="targetInput">Target notes (MIDI numbers, comma-separated)</label>
+      <input type="text" id="targetInput" value="60,64,67,60" placeholder="e.g. 60,64,67,60">
+    </div>
+  </div>
+  <div class="sub" style="margin-top:-8px; margin-bottom:14px;">Default 60,64,67,60 = C4, E4, G4, C4 (a simple C major arpeggio). Middle C = 60.</div>
+
+  <button id="startBtn">Start Recording</button>
+  <button id="stopBtn" class="stop" disabled>Stop &amp; Analyze</button>
+
+  <div id="liveNotes"></div>
+</div>
+
+<div class="panel" id="resultsPanel" style="display:none;">
+  <div class="metric-grid">
+    <div class="metric"><div class="label">Timing accuracy</div><div class="value" id="mTiming">–</div></div>
+    <div class="metric"><div class="label">Note accuracy</div><div class="value" id="mNotes">–</div></div>
+    <div class="metric"><div class="label">Avg. velocity</div><div class="value" id="mVelocity">–</div></div>
+  </div>
+  <div id="feedbackList"></div>
+</div>
+
+<script src="analysis-engine.js"></script>
+<script>
+const deviceStatus = document.getElementById('deviceStatus');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const liveNotes = document.getElementById('liveNotes');
+const resultsPanel = document.getElementById('resultsPanel');
+
+let recording = false;
+let sessionNotes = [];   // { note, velocity, startTime }
+let recordingStartTime = null;
+
+function logLive(text) {
+  const line = document.createElement('div');
+  line.textContent = text;
+  liveNotes.prepend(line);
+}
+
+// --- MIDI setup (same approach as midi_test.html) ---
+if (!navigator.requestMIDIAccess) {
+  deviceStatus.textContent = '✗ Web MIDI API not supported — use Chrome or Edge.';
+} else {
+  navigator.requestMIDIAccess().then(midiAccess => {
+    const inputs = Array.from(midiAccess.inputs.values());
+    if (inputs.length === 0) {
+      deviceStatus.textContent = '⚠ No MIDI device detected. Connect your keyboard and reload.';
+      deviceStatus.className = 'status warn';
+      return;
+    }
+    deviceStatus.textContent = `✓ Connected: ${inputs[0].name}`;
+    deviceStatus.className = 'status ok';
+    inputs.forEach(input => input.onmidimessage = handleMIDIMessage);
+  });
+}
+
+function handleMIDIMessage(event) {
+  const [status, data1, data2] = event.data;
+  const command = status >> 4;
+
+  if (!recording) return; // ignore notes played outside a recording session
+
+  if (command === 9 && data2 > 0) {
+    // Note ON
+    const elapsed = performance.now() - recordingStartTime;
+    sessionNotes.push({ note: data1, velocity: data2, startTime: elapsed });
+    logLive(`Note ${data1}  velocity ${data2}  t=${Math.round(elapsed)}ms`);
+  }
+}
+
+startBtn.addEventListener('click', () => {
+  recording = true;
+  sessionNotes = [];
+  recordingStartTime = performance.now();
+  liveNotes.innerHTML = '';
+  resultsPanel.style.display = 'none';
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+  logLive('--- Recording started, play now ---');
+});
+
+stopBtn.addEventListener('click', () => {
+  recording = false;
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  runAnalysis();
+});
+
+function runAnalysis() {
+  if (sessionNotes.length === 0) {
+    alert('No notes were captured — try again and make sure your keyboard is connected.');
+    return;
+  }
+
+  const bpm = parseFloat(document.getElementById('bpmInput').value) || 80;
+  const targetNotes = document.getElementById('targetInput').value
+    .split(',')
+    .map(n => parseInt(n.trim(), 10))
+    .filter(n => !isNaN(n));
+
+  // Build a reference beat grid starting from the first note played
+  const grid = MIDISenseAnalysis.buildReferenceBeatGrid(sessionNotes[0].startTime, bpm, sessionNotes.length);
+
+  const timingResults = MIDISenseAnalysis.analyzeTiming(sessionNotes, grid);
+  const noteResults = MIDISenseAnalysis.analyzeNoteCorrectness(sessionNotes, targetNotes);
+  const dynamicsResults = MIDISenseAnalysis.analyzeDynamics(sessionNotes);
+  const feedback = MIDISenseAnalysis.generateFeedback(timingResults, noteResults, dynamicsResults);
+
+  const onTimeCount = timingResults.filter(r => r.onTime).length;
+  const timingAccuracyPct = Math.round((onTimeCount / timingResults.length) * 100);
+
+  document.getElementById('mTiming').textContent = `${timingAccuracyPct}%`;
+  document.getElementById('mNotes').textContent = `${Math.round(noteResults.accuracy * 100)}%`;
+  document.getElementById('mVelocity').textContent = dynamicsResults.averageVelocity;
+
+  const feedbackList = document.getElementById('feedbackList');
+  feedbackList.innerHTML = '';
+  feedback.forEach(line => {
+    const div = document.createElement('div');
+    div.className = 'feedback-line';
+    div.textContent = line;
+    feedbackList.appendChild(div);
+  });
+
+  resultsPanel.style.display = 'block';
+}
+</script>
+
+</body>
+</html>

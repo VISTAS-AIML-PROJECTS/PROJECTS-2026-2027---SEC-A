@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MIDISense — Phase 0: MIDI Capture Test</title>
+<style>
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f0f1a;
+    color: #eaeaf2;
+    margin: 0;
+    padding: 40px;
+  }
+  h1 { color: #8b8bf5; margin-bottom: 4px; }
+  .sub { color: #9a9ab0; margin-bottom: 24px; }
+  .panel {
+    background: #1a1a2e;
+    border: 1px solid #2b2b52;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+  }
+  .status { font-size: 15px; margin-bottom: 6px; }
+  .status.ok { color: #6ee7b7; }
+  .status.warn { color: #fbbf24; }
+  .status.err { color: #fb7185; }
+  #deviceList { margin: 0; padding-left: 20px; }
+  #deviceList li { margin-bottom: 4px; }
+  #log {
+    background: #0a0a14;
+    border-radius: 8px;
+    padding: 14px;
+    height: 320px;
+    overflow-y: auto;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #1e1e35; }
+  .row span.note { color: #8b8bf5; font-weight: 600; }
+  .row span.vel { color: #6ee7b7; }
+  .row span.t { color: #6b6b85; }
+  .noteon { color: #6ee7b7; }
+  .noteoff { color: #6b6b85; }
+</style>
+</head>
+<body>
+
+<h1>MIDISense — Phase 0: MIDI Capture Test</h1>
+<div class="sub">Purpose: confirm the Web MIDI API reliably captures note, velocity, and timing from a real connected MIDI keyboard before building anything else on top of it.</div>
+
+<div class="panel">
+  <div class="status" id="apiStatus">Checking Web MIDI API support…</div>
+  <div class="status" id="deviceStatus">Waiting for devices…</div>
+  <ul id="deviceList"></ul>
+</div>
+
+<div class="panel">
+  <div class="sub" style="margin-bottom:10px;">Live MIDI event log — play your keyboard now</div>
+  <div id="log"></div>
+</div>
+
+<script>
+const apiStatus = document.getElementById('apiStatus');
+const deviceStatus = document.getElementById('deviceStatus');
+const deviceList = document.getElementById('deviceList');
+const log = document.getElementById('log');
+
+function noteName(n) {
+  const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const octave = Math.floor(n / 12) - 1;
+  return names[n % 12] + octave;
+}
+
+function logEvent(html) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = html;
+  log.prepend(row);
+  // cap log length so it doesn't grow forever during a long test session
+  while (log.children.length > 200) log.removeChild(log.lastChild);
+}
+
+if (!navigator.requestMIDIAccess) {
+  apiStatus.textContent = '✗ Web MIDI API is not supported in this browser. Use Chrome or Edge.';
+  apiStatus.className = 'status err';
+} else {
+  apiStatus.textContent = '✓ Web MIDI API is supported in this browser.';
+  apiStatus.className = 'status ok';
+
+  navigator.requestMIDIAccess().then(onMIDISuccess, onMIDIFailure);
+}
+
+function onMIDIFailure() {
+  deviceStatus.textContent = '✗ Could not access MIDI devices — check browser permissions.';
+  deviceStatus.className = 'status err';
+}
+
+function onMIDISuccess(midiAccess) {
+  const inputs = Array.from(midiAccess.inputs.values());
+
+  if (inputs.length === 0) {
+    deviceStatus.textContent = '⚠ No MIDI input devices detected. Connect your MIDI keyboard via USB and reload this page.';
+    deviceStatus.className = 'status warn';
+    return;
+  }
+
+  deviceStatus.textContent = `✓ ${inputs.length} MIDI input device(s) detected:`;
+  deviceStatus.className = 'status ok';
+
+  inputs.forEach(input => {
+    const li = document.createElement('li');
+    li.textContent = `${input.name} (id: ${input.id})`;
+    deviceList.appendChild(li);
+    input.onmidimessage = handleMIDIMessage;
+  });
+
+  // Detect devices connected/disconnected after page load
+  midiAccess.onstatechange = (e) => {
+    logEvent(`<span class="t">[device ${e.port.state}]</span> <span>${e.port.name}</span>`);
+  };
+}
+
+function handleMIDIMessage(event) {
+  const [status, data1, data2] = event.data;
+  const command = status >> 4;
+  const timestamp = performance.now().toFixed(1);
+
+  if (command === 9 && data2 > 0) {
+    // Note ON
+    logEvent(`<span class="noteon">NOTE ON </span> <span class="note">${noteName(data1)}</span> &nbsp; velocity <span class="vel">${data2}</span> &nbsp; <span class="t">t=${timestamp}ms</span>`);
+  } else if (command === 8 || (command === 9 && data2 === 0)) {
+    // Note OFF (or note-on with velocity 0, which is the same thing per MIDI spec)
+    logEvent(`<span class="noteoff">NOTE OFF</span> <span class="note">${noteName(data1)}</span> &nbsp; <span class="t">t=${timestamp}ms</span>`);
+  } else if (command === 11) {
+    // Control change (e.g. mod wheel, sustain pedal)
+    logEvent(`<span class="t">CC</span> controller ${data1} = ${data2} &nbsp; <span class="t">t=${timestamp}ms</span>`);
+  }
+}
+</script>
+
+</body>
+</html>
