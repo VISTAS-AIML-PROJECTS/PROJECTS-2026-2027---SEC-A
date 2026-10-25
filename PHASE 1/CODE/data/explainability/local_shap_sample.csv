@@ -1,0 +1,101 @@
+customer_id,feature,shap_value,absolute_shap_value
+0,numerical__Satisfaction Score,-4.336890697479248,4.336890697479248
+0,numerical__Number of Referrals,-1.246505618095398,1.246505618095398
+0,categorical__Online Security__accumulated_Yes,-0.2671936452388763,0.2671936452388763
+0,numerical__Monthly Charges,-0.2242408990859985,0.2242408990859985
+0,categorical__Contract__Telco_customer_churn_services_Month-to-Month,0.184146374464035,0.184146374464035
+0,numerical__Tenure Months,-0.1631164997816085,0.1631164997816085
+0,categorical__Partner_No,0.0902928560972213,0.0902928560972213
+0,categorical__Online Security__Telco_customer_churn_services_No,-0.0878899544477462,0.0878899544477462
+0,categorical__Online Security__accumulated_No,-0.0871806964278221,0.0871806964278221
+0,numerical__Number of Dependents,0.08662711083889,0.08662711083889
+1,categorical__Contract__Telco_customer_churn_services_Month-to-Month,-0.7437387108802795,0.7437387108802795
+1,numerical__Age,0.4527665078639984,0.4527665078639984
+1,numerical__Monthly Charges,0.4517516493797302,0.4517516493797302
+1,numerical__Satisfaction Score,-0.4082869589328766,0.4082869589328766
+1,categorical__Online Security__accumulated_No,0.3772602379322052,0.3772602379322052
+1,categorical__Contract__Telco_customer_churn_services_Two Year,-0.3038379549980163,0.3038379549980163
+1,numerical__CLTV,-0.143618494272232,0.143618494272232
+1,numerical__Longitude__Telco_customer_churn_location,-0.140704721212387,0.140704721212387
+1,categorical__Online Security__accumulated_Yes,0.1326252669095993,0.1326252669095993
+1,numerical__Tenure Months,0.1125120371580123,0.1125120371580123
+2,categorical__Contract__Telco_customer_churn_services_Month-to-Month,-0.8179430365562439,0.8179430365562439
+2,categorical__Online Security__accumulated_No,0.4157651662826538,0.4157651662826538
+2,numerical__Satisfaction Score,-0.3887465894222259,0.3887465894222259
+2,numerical__Age,0.3703020811080932,0.3703020811080932
+2,categorical__Contract__Telco_customer_churn_services_Two Year,-0.3153811991214752,0.3153811991214752
+2,numerical__Monthly Charges,-0.2884717881679535,0.2884717881679535
+2,numerical__Tenure Months,0.1974814981222152,0.1974814981222152
+2,numerical__Longitude__Telco_customer_churn_location,-0.166907399892807,0.166907399892807
+2,categorical__Online Security__accumulated_Yes,0.1256681978702545,0.1256681978702545
+2,numerical__Total Revenue,-0.0992693677544593,0.0992693677544593
+3,numerical__Satisfaction Score,-4.99384355545044,4.99384355545044
+3,categorical__Contract__Telco_customer_churn_services_Month-to-Month,0.2172521352767944,0.2172521352767944
+3,categorical__Payment Method__Telco_customer_churn_services_Credit Card,-0.1800222396850586,0.1800222396850586
+3,numerical__Monthly Charges,-0.1484731286764145,0.1484731286764145
+3,categorical__Online Security__accumulated_No,-0.1220181137323379,0.1220181137323379
+3,numerical__Age,-0.1101832389831543,0.1101832389831543
+3,numerical__Tenure Months,0.093158908188343,0.093158908188343
+3,numerical__Zip Code__Telco_customer_churn_location,-0.088412195444107,0.088412195444107
+3,numerical__Total Charges__Telco_customer_churn_services,0.0831998661160469,0.0831998661160469
+3,numerical__Total Revenue,0.0805437713861465,0.0805437713861465
+4,numerical__Satisfaction Score,-1.157190203666687,1.157190203666687
+4,categorical__Online Security__accumulated_Yes,-0.7513568997383118,0.7513568997383118
+4,numerical__Number of Dependents,-0.5985409021377563,0.5985409021377563
+4,numerical__Number of Referrals,0.4235089421272278,0.4235089421272278
+4,categorical__Contract__Telco_customer_churn_services_Month-to-Month,-0.3690218329429626,0.3690218329429626
+4,categorical__Online Security__accumulated_No,-0.3417526185512543,0.3417526185512543
+4,categorical__Contract__Telco_customer_churn_services_Two Year,-0.3151151239871979,0.3151151239871979
+4,numerical__Tenure Months,-0.2937038242816925,0.2937038242816925
+4,categorical__Online Security__Telco_customer_churn_services_No,-0.2437117099761963,0.2437117099761963
+4,numerical__Total Charges__Telco_customer_churn_services,-0.17666856944561,0.17666856944561
+5,numerical__Satisfaction Score,-4.274445056915283,4.274445056915283
+5,numerical__Number of Referrals,-0.8865385055541992,0.8865385055541992
+5,categorical__Online Security__accumulated_Yes,-0.3314194679260254,0.3314194679260254
+5,categorical__Contract__Telco_customer_churn_services_Month-to-Month,-0.3118683099746704,0.3118683099746704
+5,categorical__Contract__Telco_customer_churn_services_Two Year,-0.3025599420070648,0.3025599420070648
+5,numerical__Tenure Months,-0.1637152880430221,0.1637152880430221
+5,categorical__Online Security__Telco_customer_churn_services_No,-0.1284540891647339,0.1284540891647339
+5,numerical__Total Charges__Telco_customer_churn_services,-0.1135087609291076,0.1135087609291076
+5,categorical__Tech Support_Yes,-0.1102690622210502,0.1102690622210502
+5,numerical__Number of Dependents,0.0931751057505607,0.0931751057505607
+6,numerical__Satisfaction Score,-4.879512786865234,4.879512786865234
+6,categorical__Contract__Telco_customer_churn_services_Month-to-Month,-0.3133728802204132,0.3133728802204132
+6,numerical__Longitude__Telco_customer_churn_location,0.2340768277645111,0.2340768277645111
+6,categorical__Contract__Telco_customer_churn_services_Two Year,-0.217569500207901,0.217569500207901
+6,numerical__Tenure Months,-0.1716662347316742,0.1716662347316742
+6,numerical__Monthly Charges,-0.1377291828393936,0.1377291828393936
+6,categorical__Online Security__accumulated_No,-0.106344349682331,0.106344349682331
+6,numerical__Number of Dependents,0.0941324904561042,0.0941324904561042
+6,numerical__Age,-0.0867376551032066,0.0867376551032066
+6,categorical__Paperless Billing_No,-0.0759512484073638,0.0759512484073638
+7,numerical__Number of Referrals,-1.49810791015625,1.49810791015625
+7,numerical__Satisfaction Score,-1.2437260150909424,1.2437260150909424
+7,categorical__Online Security__accumulated_Yes,-0.6462942957878113,0.6462942957878113
+7,categorical__Contract__Telco_customer_churn_services_Month-to-Month,-0.325412780046463,0.325412780046463
+7,categorical__Contract__Telco_customer_churn_services_Two Year,-0.2704650163650512,0.2704650163650512
+7,categorical__Online Security__accumulated_No,-0.2682364583015442,0.2682364583015442
+7,categorical__Online Security__Telco_customer_churn_services_No,-0.2592366933822632,0.2592366933822632
+7,numerical__Tenure Months,-0.2534151673316955,0.2534151673316955
+7,numerical__Longitude__Telco_customer_churn_location,0.2084786295890808,0.2084786295890808
+7,categorical__Tech Support_Yes,-0.2044323831796646,0.2044323831796646
+8,numerical__Satisfaction Score,-1.057022213935852,1.057022213935852
+8,categorical__Online Security__accumulated_Yes,-0.813723087310791,0.813723087310791
+8,categorical__Online Security__accumulated_No,-0.3822809755802154,0.3822809755802154
+8,categorical__Online Security__Telco_customer_churn_services_No,-0.3503397107124328,0.3503397107124328
+8,numerical__Zip Code__Telco_customer_churn_location,-0.2599820792675018,0.2599820792675018
+8,categorical__Contract__Telco_customer_churn_services_Month-to-Month,0.2485574781894683,0.2485574781894683
+8,numerical__Avg Monthly Long Distance Charges,0.232914462685585,0.232914462685585
+8,numerical__Tenure Months,-0.211631566286087,0.211631566286087
+8,numerical__Age,-0.1765347421169281,0.1765347421169281
+8,categorical__Payment Method__Telco_customer_churn_services_Credit Card,-0.128820851445198,0.128820851445198
+9,numerical__Monthly Charges,0.3944950401782989,0.3944950401782989
+9,numerical__Satisfaction Score,-0.3026697337627411,0.3026697337627411
+9,numerical__Tenure Months,0.2136496305465698,0.2136496305465698
+9,numerical__CLTV,-0.1488014757633209,0.1488014757633209
+9,numerical__Zip Code__accumulated,0.1487113088369369,0.1487113088369369
+9,numerical__Number of Dependents,0.128858745098114,0.128858745098114
+9,numerical__Age,-0.1145025119185447,0.1145025119185447
+9,numerical__Number of Referrals,0.0919031351804733,0.0919031351804733
+9,numerical__Latitude__accumulated,0.0878448262810707,0.0878448262810707
+9,numerical__Total Long Distance Charges,-0.0697211921215057,0.0697211921215057
