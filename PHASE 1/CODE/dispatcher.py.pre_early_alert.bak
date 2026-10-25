@@ -1,0 +1,409 @@
+"""
+Incident Dispatcher for Visionguard Apartment CCTV Security.
+Handles:
+- Automated forensic snapshot evidence capture on MID / HIGH threats.
+- Instant alert routing to Nearest Security Guard Booth.
+- Emergency dispatch report generation for Local Police Station (112).
+- Real-time WebSocket broadcasting to Security Operations Center (SOC) dashboard.
+- Incident state tracking (PENDING, GUARD_DISPATCHED, POLICE_NOTIFIED, RESOLVED).
+"""
+
+from dataclasses import dataclass, asdict, field
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+import threading
+import time
+from typing import Dict, List, Optional, Any, Callable
+import uuid
+import cv2
+import numpy as np
+
+from src.config import ThreatLevel, WORKSPACE_ROOT
+from src.threat_analyzer import ThreatAssessment
+from src.alerts import AudioAlertManager
+from src.roi_extractor import ForensicROIExtractor
+from src.mobile_notifier import MobileAlertNotifier
+
+
+@dataclass
+class Incident:
+    """Security threat incident record."""
+    id: str
+    timestamp: str
+    cam_id: str
+    cam_name: str
+    location: str
+    threat_level: str
+    title: str
+    details: List[str]
+    snapshot_filename: str
+    snapshot_url: str
+    status: str  # "ACTIVE", "GUARD_DISPATCHED", "POLICE_NOTIFIED", "RESOLVED", "FALSE_ALARM"
+    assigned_booth: str
+    booth_contact: str
+    nearest_police: str
+    police_contact: str
+    property_name: str
+    property_address: str
+    confidence_score: float = 0.0
+    actor_id: Optional[str] = None
+    target_id: Optional[str] = None
+    dossier_filename: Optional[str] = None
+    dossier_url: Optional[str] = None
+    face_url: Optional[str] = None
+    victim_face_url: Optional[str] = None
+    suspect_face_url: Optional[str] = None
+    target_face_url: Optional[str] = None
+    posture_url: Optional[str] = None
+    victim_posture_url: Optional[str] = None
+    target_posture_url: Optional[str] = None
+    weapon_url: Optional[str] = None
+    suspect_face_enhanced_url: Optional[str] = None
+    suspect_face_quality_label: str = "SOURCE"
+    victim_face_enhanced_url: Optional[str] = None
+    victim_face_quality_label: str = "SOURCE"
+    target_face_enhanced_url: Optional[str] = None
+    sequence_urls: List[str] = field(default_factory=list)
+    history: List[Dict[str, str]] = field(default_factory=list)
+
+
+class IncidentDispatcher:
+    """Dispatches, records, and manages apartment security threat incidents."""
+
+    def __init__(
+        self,
+        dispatch_config_path: Path = WORKSPACE_ROOT / "config" / "dispatch.json",
+        snapshots_dir: Path = WORKSPACE_ROOT / "alerts" / "snapshots",
+    ):
+        self.snapshots_dir = Path(snapshots_dir)
+        self.snapshots_dir.mkdir(parents=True, exist_ok=True)
+        self.dispatch_config = self._load_dispatch_config(dispatch_config_path)
+
+        self.audio_manager = AudioAlertManager()
+        self.roi_extractor = ForensicROIExtractor(output_dir=self.snapshots_dir)
+        self.mobile_notifier = MobileAlertNotifier(dispatch_config=self.dispatch_config)
+        self.incidents: Dict[str, Incident] = {}
+        self.active_incidents: List[str] = []
+        self._lock = threading.Lock()
+
+        # Alert cooldown per camera {cam_id: last_alert_time}
+        self.last_alert_time: Dict[str, float] = {}
+        self.cooldown_seconds: float = self.dispatch_config.get("dispatch_rules", {}).get("alert_cooldown_seconds", 10.0)
+
+        # Broadcast callbacks (e.g. WebSocket manager)
+        self._broadcast_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+
+    def _load_dispatch_config(self, path: Path) -> Dict[str, Any]:
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"[Dispatcher] Warning: Error loading {path}: {e}")
+        return {
+            "property_name": "Integrated Security Control Operations",
+            "property_address": "Main Campus & Premises",
+            "police_emergency_station": "Local Police Control Room",
+            "police_emergency_phone": "100",
+            "dispatch_rules": {"alert_cooldown_seconds": 10.0},
+        }
+
+    def register_broadcast_callback(self, cb: Callable[[Dict[str, Any]], None]):
+        """Registers a callback function to receive live alert JSON payloads."""
+        self._broadcast_callbacks.append(cb)
+
+    def process_threat(
+        self,
+        cam_info: Dict[str, Any],
+        assessment: ThreatAssessment,
+        frame: np.ndarray,
+        threat_event: Optional[Any] = None,
+    ) -> Optional[Incident]:
+        """
+        Evaluates assessment. If MID or HIGH threat detected and cooldown has passed,
+        creates an Incident, saves a snapshot, triggers audio, and dispatches alerts.
+        """
+        # Tier 1 Escalation: LOW THREAT -> Silent forensics logging only
+        if assessment.level == ThreatLevel.LOW:
+            cam_id = cam_info.get("id", "cam-01")
+            self.mobile_notifier.log_low_threat(assessment=assessment, cam_id=cam_id)
+            return None
+
+        if assessment.level not in (ThreatLevel.MID, ThreatLevel.HIGH, ThreatLevel.CRITICAL):
+            return None
+
+        cam_id = cam_info["id"]
+        now = time.time()
+
+        with self._lock:
+            last_time = self.last_alert_time.get(cam_id, 0.0)
+            if now - last_time < self.cooldown_seconds:
+                return None  # Cooldown active for this camera
+            self.last_alert_time[cam_id] = now
+
+        # 1. Generate unique incident ID and timestamp
+        inc_id = f"INC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{cam_id[-2:]}"
+        timestamp_str = datetime.now().isoformat()
+
+        # 2. Save forensic snapshot image
+        snapshot_fname = f"{inc_id}.jpg"
+        snapshot_filepath = self.snapshots_dir / snapshot_fname
+        try:
+            cv2.imwrite(str(snapshot_filepath), frame)
+        except Exception as e:
+            print(f"[Dispatcher] Error saving snapshot: {e}")
+
+        try:
+            from src.config import DESKTOP_CAPTURES_DIR
+            desktop_snapshot = DESKTOP_CAPTURES_DIR / f"{assessment.threat_type}_{snapshot_fname}"
+            cv2.imwrite(str(desktop_snapshot), frame)
+            print(f"[Photo Saved] -> {desktop_snapshot}")
+        except Exception as e:
+            print(f"[Dispatcher] Desktop snapshot save notice: {e}")
+
+        # 3. Dynamically extract forensic ROIs and compile evidence dossier
+        cam_name = cam_info.get("name", cam_id)
+        dossier = None
+        dossier_url = None
+        face_url = None
+        victim_face_url = None
+        suspect_face_url = None
+        target_face_url = None
+        posture_url = None
+        victim_posture_url = None
+        target_posture_url = None
+        weapon_url = None
+        suspect_face_enhanced_url = None
+        suspect_face_quality_label = "SOURCE"
+        victim_face_enhanced_url = None
+        victim_face_quality_label = "SOURCE"
+        target_face_enhanced_url = None
+        sequence_urls = []
+        try:
+            dossier = self.roi_extractor.extract_dossier(
+                frame=frame,
+                assessment=assessment,
+                cam_name=cam_name,
+                incident_id=inc_id,
+                threat_event=threat_event,
+            )
+            if dossier:
+                dossier_url = f"/alerts/snapshots/{dossier.dossier_filename}"
+                if dossier.face_filename:
+                    face_url = f"/alerts/snapshots/{dossier.face_filename}"
+                if dossier.victim_face_filename:
+                    victim_face_url = f"/alerts/snapshots/{dossier.victim_face_filename}"
+                    target_face_url = victim_face_url
+                if dossier.suspect_face_filename:
+                    suspect_face_url = f"/alerts/snapshots/{dossier.suspect_face_filename}"
+                if dossier.suspect_face_enhanced is not None:
+                    suspect_face_enhanced_url = f"/alerts/snapshots/{inc_id}_suspect_face_enhanced.jpg"
+                if dossier.victim_face_enhanced is not None:
+                    victim_face_enhanced_url = f"/alerts/snapshots/{inc_id}_victim_face_enhanced.jpg"
+                    target_face_enhanced_url = victim_face_enhanced_url
+                suspect_face_quality_label = getattr(dossier, "suspect_face_quality_label", "SOURCE")
+                victim_face_quality_label = getattr(dossier, "victim_face_quality_label", "SOURCE")
+                if dossier.sequence_filenames:
+                    sequence_urls = [f"/alerts/snapshots/{fname}" for fname in dossier.sequence_filenames]
+                if dossier.posture_filename:
+                    posture_url = f"/alerts/snapshots/{dossier.posture_filename}"
+                if dossier.victim_posture_filename:
+                    victim_posture_url = f"/alerts/snapshots/{dossier.victim_posture_filename}"
+                    target_posture_url = victim_posture_url
+                if dossier.weapon_filename:
+                    weapon_url = f"/alerts/snapshots/{dossier.weapon_filename}"
+        except Exception as e:
+            print(f"[Dispatcher] Error extracting forensic dossier: {e}")
+
+        # Calculate primary confidence score
+        confidence_score = 0.0
+        if assessment.weapons:
+            confidence_score = round(max(w.conf for w in assessment.weapons), 2)
+
+        # 4. Authoritative Actor & Target Identification
+        actor_id = getattr(threat_event, "actor_id", None) or assessment.actor_person_id
+        target_id = getattr(threat_event, "target_id", None) or assessment.target_person_id
+        if actor_id and target_id and actor_id == target_id:
+            target_id = None
+
+        initial_status = "ACTIVE"
+        history_entry = {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "action": f"Threat detected: {assessment.title} (Confidence: {confidence_score})",
+            "actor": "System Visionguard",
+        }
+
+        incident = Incident(
+            id=inc_id,
+            timestamp=timestamp_str,
+            cam_id=cam_id,
+            cam_name=cam_name,
+            location=cam_info.get("location", "Apartment Area"),
+            threat_level=assessment.level.name,
+            title=assessment.title,
+            details=assessment.details,
+            snapshot_filename=snapshot_fname,
+            snapshot_url=f"/alerts/snapshots/{snapshot_fname}",
+            status=initial_status,
+            assigned_booth=cam_info.get("assigned_booth", "Main Security Booth"),
+            booth_contact=cam_info.get("booth_contact", "Ext: 101"),
+            nearest_police=cam_info.get("police_jurisdiction", self.dispatch_config.get("police_emergency_station", "Local Police Control Room")),
+            police_contact=cam_info.get("police_contact", self.dispatch_config.get("police_emergency_phone", "100")),
+            property_name=self.dispatch_config.get("facility_name", self.dispatch_config.get("property_name", "Campus Premises")),
+            property_address=self.dispatch_config.get("facility_address", self.dispatch_config.get("property_address", "")),
+            confidence_score=confidence_score,
+            actor_id=actor_id,
+            target_id=target_id,
+            dossier_filename=dossier.dossier_filename if dossier else None,
+            dossier_url=dossier_url,
+            face_url=face_url,
+            victim_face_url=victim_face_url,
+            suspect_face_url=suspect_face_url,
+            target_face_url=target_face_url,
+            suspect_face_enhanced_url=suspect_face_enhanced_url,
+            suspect_face_quality_label=suspect_face_quality_label,
+            victim_face_enhanced_url=victim_face_enhanced_url,
+            victim_face_quality_label=victim_face_quality_label,
+            target_face_enhanced_url=target_face_enhanced_url,
+            sequence_urls=sequence_urls,
+            posture_url=posture_url,
+            victim_posture_url=victim_posture_url,
+            target_posture_url=target_posture_url,
+            weapon_url=weapon_url,
+            history=[history_entry],
+        )
+
+        with self._lock:
+            self.incidents[inc_id] = incident
+            self.active_incidents.insert(0, inc_id)
+
+
+        # 4. Trigger audio alert
+        self.audio_manager.trigger(assessment.level)
+
+        # 5. Broadcast to WebSocket clients (SOC Dashboard)
+        payload = {
+            "type": "NEW_THREAT_ALERT",
+            "incident": asdict(incident),
+        }
+        for cb in self._broadcast_callbacks:
+            try:
+                cb(payload)
+            except Exception as e:
+                print(f"[Dispatcher] Broadcast error: {e}")
+
+        # 6. Auto-police dispatch if HIGH threat
+        auto_police = self.dispatch_config.get("dispatch_rules", {}).get("auto_police_dispatch_on_high", False)
+        if assessment.level == ThreatLevel.HIGH and auto_police:
+            self.notify_police(inc_id, notes="Automatic emergency dispatch for lethal firearm detection.")
+
+        # 7. Tier 2 & Tier 3 Mobile Escalation:
+        # MID THREAT  -> Instant Mobile Message (Telegram / Twilio SMS / WhatsApp)
+        # HIGH THREAT -> Automated Phone Call (Twilio Voice) + Urgent Snapshot Message
+        snapshot_filepath = self.snapshots_dir / snapshot_fname
+        if assessment.level == ThreatLevel.HIGH:
+            self.mobile_notifier.make_high_threat_call(
+                assessment=assessment,
+                cam_info=cam_info,
+                snapshot_path=snapshot_filepath,
+            )
+        elif assessment.level == ThreatLevel.MID:
+            self.mobile_notifier.send_mid_threat_message(
+                assessment=assessment,
+                cam_info=cam_info,
+                snapshot_path=snapshot_filepath,
+            )
+
+        return incident
+
+    def dispatch_guard(self, incident_id: str, notes: str = "") -> bool:
+        """Dispatches nearest security guard booth to the scene."""
+        with self._lock:
+            if incident_id not in self.incidents:
+                return False
+            inc = self.incidents[incident_id]
+            inc.status = "GUARD_DISPATCHED"
+            inc.history.append({
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "action": f"Dispatched {inc.assigned_booth}. Notes: {notes or 'Immediate intervention requested'}",
+                "actor": "Security Controller",
+            })
+
+        self._broadcast_incident_update(inc)
+        return True
+
+    def notify_police(self, incident_id: str, notes: str = "") -> bool:
+        """Dispatches emergency incident report to the Local Police Station / 112."""
+        with self._lock:
+            if incident_id not in self.incidents:
+                return False
+            inc = self.incidents[incident_id]
+            inc.status = "POLICE_NOTIFIED"
+            inc.history.append({
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "action": f"Emergency Dispatch sent to {inc.nearest_police} ({inc.police_contact}). {notes}",
+                "actor": "Police Dispatch Gateway",
+            })
+
+        print("=" * 60)
+        print(f"  🚨 EMERGENCY POLICE DISPATCH TRANSMITTED (100)")
+        print(f"  Incident ID:      {inc.id}")
+        print(f"  Property:         {inc.property_name}")
+        print(f"  Address:          {inc.property_address}")
+        print(f"  Location:         {inc.location} (Camera: {inc.cam_name})")
+        print(f"  Threat Severity:  {inc.threat_level} - {inc.title}")
+        print(f"  Police Station:   {inc.nearest_police} ({inc.police_contact})")
+        print(f"  Snapshot:         {inc.snapshot_url}")
+        print("=" * 60)
+
+        self._broadcast_incident_update(inc)
+        return True
+
+    def resolve_incident(self, incident_id: str, notes: str = "") -> bool:
+        """Marks incident as resolved."""
+        with self._lock:
+            if incident_id not in self.incidents:
+                return False
+            inc = self.incidents[incident_id]
+            inc.status = "RESOLVED"
+            inc.history.append({
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "action": f"Incident verified & resolved. Notes: {notes or 'All clear'}",
+                "actor": "Security Controller",
+            })
+
+        self._broadcast_incident_update(inc)
+        return True
+
+    def mark_false_alarm(self, incident_id: str, notes: str = "") -> bool:
+        """Marks incident as false alarm."""
+        with self._lock:
+            if incident_id not in self.incidents:
+                return False
+            inc = self.incidents[incident_id]
+            inc.status = "FALSE_ALARM"
+            inc.history.append({
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "action": f"Flagged as False Alarm. Reason: {notes or 'Manual review verified non-threat'}",
+                "actor": "Security Controller",
+            })
+
+        self._broadcast_incident_update(inc)
+        return True
+
+    def _broadcast_incident_update(self, incident: Incident):
+        payload = {
+            "type": "INCIDENT_UPDATE",
+            "incident": asdict(incident),
+        }
+        for cb in self._broadcast_callbacks:
+            try:
+                cb(payload)
+            except Exception as e:
+                print(f"[Dispatcher] Update broadcast error: {e}")
+
+    def get_all_incidents(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            return [asdict(self.incidents[iid]) for iid in self.active_incidents]

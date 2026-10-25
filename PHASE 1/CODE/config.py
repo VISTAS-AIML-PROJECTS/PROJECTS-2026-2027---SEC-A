@@ -1,0 +1,246 @@
+"""
+Configuration module for Visionguard Context-Aware Threat Detection.
+Defines threat levels, colors, normalized distance/motion ratios,
+model configurations, temporal hysteresis windows, and audio settings.
+"""
+
+from enum import Enum
+from pathlib import Path
+
+
+class ThreatLevel(Enum):
+    """
+    5-Tier Gated Threat Classification System.
+    Includes backward-compatible aliases for legacy test suites.
+    """
+    SAFE = 0
+    LOW = 1
+    MID = 2
+    HIGH = 3
+    CRITICAL = 4
+
+    @property
+    def label(self) -> str:
+        if self == ThreatLevel.SAFE:
+            return "NORMAL"
+        if self in (ThreatLevel.LOW, ThreatLevel.MID):
+            return "LOW"
+        return "HIGH"
+
+
+# Backward compatibility aliases
+ThreatLevel.NORMAL = ThreatLevel.SAFE
+ThreatLevel.SUSPICIOUS = ThreatLevel.LOW
+CRITICAL_ENABLED = False
+
+
+def get_optimal_device() -> str:
+    """Selects Apple Silicon MPS if available, CUDA if available, otherwise CPU."""
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            return "mps"
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
+# OpenCV Colors in BGR format
+COLOR_NORMAL = (0, 220, 0)         # Green
+COLOR_SAFE = COLOR_NORMAL
+COLOR_LOW_THREAT = (0, 215, 255)    # Gold / Yellow
+COLOR_SUSPICIOUS = (0, 140, 255)    # Amber / Orange
+COLOR_MID_THREAT = COLOR_SUSPICIOUS
+COLOR_HIGH_THREAT = (30, 30, 230)   # Crimson Red
+COLOR_CRITICAL = (0, 0, 255)        # Deep Pure Red
+
+COLOR_ZONE_NECK = (0, 165, 255)     # Orange accent
+COLOR_ZONE_STAB = (30, 30, 230)     # Crimson accent
+COLOR_ZONE_TARGET = (0, 140, 255)   # Amber target envelope
+COLOR_ZONE_DEFAULT = (120, 120, 120)
+COLOR_PERSON = (220, 220, 220)
+COLOR_ACTOR = (0, 100, 255)         # Suspect / Actor Orange-Red
+COLOR_VICTIM = (255, 220, 0)        # Target / Victim Yellow
+COLOR_FOOD = (0, 255, 128)
+COLOR_WEAPON = (0, 0, 255)
+
+# Anatomical Zone Ratios relative to Person Bounding Box Height (H)
+ZONE_HEAD_TOP = 0.0
+ZONE_HEAD_BOTTOM = 0.20
+
+ZONE_NECK_TOP = 0.15
+ZONE_NECK_BOTTOM = 0.40
+
+ZONE_CHEST_TOP = 0.20
+ZONE_CHEST_BOTTOM = 0.55
+
+ZONE_ABDOMEN_TOP = 0.50
+ZONE_ABDOMEN_BOTTOM = 0.70
+
+ZONE_TORSO_TOP = 0.25
+ZONE_TORSO_BOTTOM = 0.65
+
+ZONE_CUTTING_TOP = 0.65
+ZONE_CUTTING_BOTTOM = 1.30
+
+# Normalized Distance Thresholds (relative to mean person height H)
+# d_norm = distance / mean_height
+DIST_NORM_INTIMATE = 0.35      # Physical scuffle / grappling (0.35 * H)
+DIST_NORM_COMBAT = 0.90        # Arm striking range (0.90 * H)
+DIST_NORM_CLOSE = 1.80         # Imminent approach / confrontation distance (1.80 * H)
+DIST_NORM_SEPARATED = 2.50     # Outside immediate physical threat range
+
+# Normalized Velocity Thresholds (in person-heights per second)
+VEL_NORM_STRIKE = 1.10         # Rapid arm strike / punch toward target (1.10 H/sec)
+VEL_NORM_APPROACH = 0.40       # Rapid closing speed toward target (0.40 H/sec)
+VEL_NORM_RAPID = 0.75          # Sudden rapid body movement / lunging
+
+# Proximity Distance Thresholds (Legacy fallback in pixels for uncalibrated frames)
+NECK_THREAT_PROXIMITY_PX = 65.0
+STAB_THREAT_PROXIMITY_PX = 95.0
+KNIFE_POINTING_PROXIMITY_PX = 320.0
+INTER_PERSON_COMBAT_PX = 200.0
+FOOD_CUTTING_PROXIMITY_PX = 85.0
+GUN_PROXIMITY_PX = 300.0
+GUN_AIMING_PROXIMITY_PX = 450.0
+
+# Master Rebuild Weapon & State Machine Gates
+WEAPON_CONFIDENCE = 0.55
+MIN_DETECTION_CONFIDENCE = 0.55
+CONFIRMATION_FRAMES = 3
+MIN_CONFIRMATION_FRAMES = 3
+FAST_DEMO_TIMEOUT = 12.0
+FAST_DEMO_HARD_TIMEOUT = 15.0
+TRACK_WINDOW = 8
+TRACK_MEMORY = 8
+HIGH_THREAT_MIN_SCORE = 75
+TARGET_MIN_SCORE = 0.60
+DEFAULT_PORT = 5000
+
+# Review Demo Weapon Focus: concentrates active pipeline on knife detection
+# Disables gun classification/escalation in active pipeline while preserving model IDs
+DEMO_KNIFE_FOCUS = True
+
+# Explicit Class Mapping (0 = gun, 1 = knife)
+WEAPON_CLASS_MAP = {
+    0: "gun",
+    1: "knife",
+}
+
+# Class-Adaptive & State Machine Detection Thresholds
+CONF_PERSON_DETECTION = 0.28
+CONF_WEAPON_CANDIDATE = 0.20
+CONF_WEAPON_CONFIRMED = 0.55
+CONF_FIREARM = 0.55
+CONF_KNIFE = 0.55
+CONF_CONTEXT = 0.28
+CONF_ASSOCIATION_MIN = 0.40
+WEAPON_MIN_PERSISTENCE_FRAMES = 4
+
+# Class Categories
+FOOD_CLASSES = {
+    'apple', 'banana', 'orange', 'broccoli', 'carrot',
+    'bowl', 'sandwich', 'hot dog', 'pizza', 'donut', 'cake', 'dining table'
+}
+
+PERSON_CLASSES = {'person'}
+
+FIREARM_CLASSES = {'gun', 'pistol', 'rifle', 'firearm', 'handgun', 'revolver'}
+SHARP_WEAPON_CLASSES = {
+    'knife', 'dagger', 'blade', 'scissors', 'cutter', 'box cutter',
+    'cleaver', 'sickle', 'sword', 'machete', 'chaku', 'razor'
+}
+WEAPON_CLASSES = FIREARM_CLASSES | SHARP_WEAPON_CLASSES
+
+# Review-Simplified Threat State Titles (NORMAL, LOW, HIGH)
+TITLE_SAFE = "NORMAL: No confirmed knife threat"
+TITLE_NORMAL = TITLE_SAFE
+TITLE_LOW_THREAT = "LOW: KNIFE DETECTED"
+TITLE_LOW_WEAPON_PRESENT = TITLE_LOW_THREAT
+TITLE_LOW_DOMESTIC = TITLE_LOW_THREAT
+TITLE_LOW_KNIFE_STANDALONE = TITLE_LOW_THREAT
+TITLE_LOW_GUN_NO_HUMAN = "LOW: WEAPON DETECTED"
+TITLE_LOW_GUN_UNAIMED = "LOW: WEAPON DETECTED"
+TITLE_MID_THREAT = "LOW: KNIFE DETECTED"
+TITLE_SUSPICIOUS = "LOW: KNIFE DETECTED"
+TITLE_MID_BRANDISHING = "LOW: KNIFE DETECTED"
+TITLE_HIGH_THREAT = "HIGH: KNIFE THREAT"
+TITLE_HIGH_STABBING = "HIGH: KNIFE THREAT"
+TITLE_HIGH_KNIFE_POINTED = "HIGH: KNIFE THREAT"
+TITLE_HIGH_CONFRONTATION = "HIGH: KNIFE THREAT"
+TITLE_HIGH_ALTERCATION = "NORMAL: No confirmed knife threat"
+TITLE_CRITICAL = "HIGH: KNIFE THREAT"
+TITLE_CRITICAL_EVENT = TITLE_CRITICAL
+TITLE_CRITICAL_THREAT = TITLE_CRITICAL
+
+# Event Category Names
+EVENT_NORMAL = "NORMAL_ACTIVITY"
+EVENT_WEAPON_DETECTED = "WEAPON_DETECTED"
+EVENT_KNIFE_DETECTED = "KNIFE_DETECTED"
+EVENT_FIREARM_DETECTED = "FIREARM_DETECTED"
+EVENT_SUSPICIOUS_MOVEMENT = "SUSPICIOUS_MOVEMENT"
+EVENT_AGGRESSIVE_GESTURE = "AGGRESSIVE_GESTURE"
+EVENT_PHYSICAL_ALTERCATION = "PHYSICAL_ALTERCATION"
+EVENT_WEAPON_THREAT = "WEAPON_THREAT"
+EVENT_HIGH_THREAT = "HIGH_THREAT_INTERACTION"
+EVENT_CRITICAL = "CRITICAL_THREAT"
+
+# Audio Alert Settings (macOS native system sounds)
+MACOS_SOUND_CRITICAL = "/System/Library/Sounds/Ping.aiff"
+MACOS_SOUND_WARNING = "/System/Library/Sounds/Tink.aiff"
+AUDIO_COOLDOWN_SECONDS = 2.5
+
+# Model Storage Paths
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+MODELS_DIR = WORKSPACE_ROOT / "models"
+LOGS_DIR = WORKSPACE_ROOT / "logs"
+
+# Load environment variables from .env if present
+env_file = WORKSPACE_ROOT / ".env"
+if env_file.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=str(env_file))
+    except Exception:
+        pass
+
+# macOS Desktop Unhidden Storage for Effortless Photo Access
+DESKTOP_CAPTURES_DIR = Path.home() / "Desktop" / "Weapon_Detections"
+try:
+    DESKTOP_CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+
+# Primary models
+PRIMARY_SAI_WEAPON_MODEL = MODELS_DIR / "sai_weapon_v8m.pt"
+DEFAULT_WEAPON_MODEL = PRIMARY_SAI_WEAPON_MODEL if PRIMARY_SAI_WEAPON_MODEL.exists() else (MODELS_DIR / "best.pt")
+SECONDARY_WEAPON_MODEL = MODELS_DIR / "threat_yolov8n.pt"
+DEFAULT_CONTEXT_MODEL = WORKSPACE_ROOT / "yolo11s.pt"   # 9.4M params (High recall context)
+FALLBACK_CONTEXT_MODEL = WORKSPACE_ROOT / "yolo11n.pt"
+DEFAULT_POSE_MODEL = WORKSPACE_ROOT / "yolo11n-pose.pt" # 2.87M params (17 keypoints)
+
+# Upstream weights if best.pt is not pre-installed
+WEAPON_MODEL_DOWNLOAD_URL = (
+    "https://huggingface.co/wuhp/guns-100-11m/resolve/main/Guns-100-11m.pt"
+)
+
+# Logging
+AUDIT_LOG_FILE = LOGS_DIR / "threat_audit.csv"
+
+# Preprocessing & Low-Light Enhancement (Disabled by default to keep camera feed 100% natural)
+CLAHE_LOW_LIGHT_THRESHOLD = 80.0
+CLAHE_CLIP_LIMIT = 2.0
+CLAHE_TILE_GRID_SIZE = (8, 8)
+
+# Motion-Gated Inference (MOG2 Background Subtraction)
+MOTION_GATE_PIXEL_THRESHOLD = 0.0035  # 0.35% frame area
+MOTION_GATE_HEARTBEAT_FRAMES = 15     # Force inference every 15 frames (guarantees stationary detection)
+MOTION_GATE_HOLDOVER_FRAMES = 30
+
+# Temporal Consistency Buffering & Hysteresis
+TEMPORAL_WINDOW_SIZE = 6
+TEMPORAL_MIN_HITS = 4
+TEMPORAL_ACTIVATION_FRAMES = 4
+TEMPORAL_DECAY_FRAMES = 12
