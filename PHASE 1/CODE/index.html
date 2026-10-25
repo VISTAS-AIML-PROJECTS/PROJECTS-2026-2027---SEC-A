@@ -1,0 +1,1054 @@
+﻿<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>SepsisGuard - Patient Early-Warning IoT Monitoring</title>
+  <meta name="description" content="SepsisGuard XIAO ESP32-C3 Real-Time Patient Early-Warning Telemetry Web Application"/>
+
+  <!-- Google Fonts: Manrope & Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""/>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet"/>
+  <!-- Material Symbols Outlined -->
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="css/style.css"/>
+
+  <!-- Tailwind CSS via CDN with SepsisGuard Clinical Sanctuary Token Extension -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "on-primary": "#1f3529",
+            "error-container": "#93000a",
+            "primary-fixed": "#cfe9d6",
+            "tertiary-container": "#00311f",
+            "background": "#152017",
+            "error": "#ffb4ab",
+            "on-secondary": "#173627",
+            "primary": "#b3cdbb",
+            "surface-container-low": "#1d2a20",
+            "on-tertiary-container": "#00a572",
+            "secondary-container": "#2e4d3c",
+            "inverse-surface": "#f7f7f0",
+            "surface-container-highest": "#3b4e3f",
+            "surface-bright": "#496350",
+            "tertiary": "#4edea3",
+            "on-surface": "#e2e3df",
+            "surface-container": "#243327",
+            "tertiary-fixed": "#6ffbbe",
+            "on-tertiary-fixed-variant": "#005236",
+            "on-background": "#e2e3df",
+            "surface-dim": "#121c14",
+            "on-secondary-fixed-variant": "#2e4d3c",
+            "on-secondary-container": "#9bbda7",
+            "surface-variant": "#374b3d",
+            "outline": "#7f9182",
+            "surface-container-high": "#2c3d2f",
+            "surface-tint": "#b3cdbb",
+            "on-tertiary-fixed": "#002113",
+            "primary-fixed-dim": "#b3cdbb",
+            "on-primary-fixed": "#092014",
+            "tertiary-fixed-dim": "#4edea3",
+            "on-primary-container": "#7e9686",
+            "outline-variant": "#3d5141",
+            "surface-container-lowest": "#0f1710",
+            "secondary-fixed": "#c7ebd4",
+            "on-error": "#690005",
+            "secondary-fixed-dim": "#accfb8",
+            "on-primary-fixed-variant": "#354c3e",
+            "secondary": "#accfb8",
+            "primary-container": "#1d3324",
+            "on-tertiary": "#003824",
+            "inverse-primary": "#4c6455",
+            "surface": "#17241a",
+            "on-secondary-fixed": "#012113",
+            "inverse-on-surface": "#18281d",
+            "on-surface-variant": "#b5c4b8",
+            "on-error-container": "#ffdad6",
+          },
+          fontFamily: {
+            "display-lg": ["Plus Jakarta Sans", "sans-serif"],
+            "headline-xl": ["Plus Jakarta Sans", "sans-serif"],
+            "headline-lg": ["Plus Jakarta Sans", "sans-serif"],
+            "headline-md": ["Plus Jakarta Sans", "sans-serif"],
+            "headline-sm": ["Plus Jakarta Sans", "sans-serif"],
+            "body-lg": ["Manrope", "sans-serif"],
+            "body-md": ["Manrope", "sans-serif"],
+            "body-sm": ["Manrope", "sans-serif"],
+            "label-lg": ["Manrope", "sans-serif"],
+            "label-md": ["Manrope", "sans-serif"],
+            "label-xs": ["Manrope", "sans-serif"],
+          }
+        }
+      }
+    };
+  </script>
+</head>
+
+<body class="font-body-md text-on-surface antialiased selection:bg-primary-container selection:text-tertiary min-h-screen woodgrain-pattern">
+
+  <!-- ======================================================= -->
+  <!-- SIDEBAR NAVIGATION (Matching UI Reference Image)        -->
+  <!-- ======================================================= -->
+  <aside class="fixed left-0 top-0 h-full w-20 md:w-24 lg:w-72 bg-[#17241a]/95 backdrop-blur-xl z-50 flex flex-col justify-between p-3 lg:p-4 border-r border-[#2d4032]/40 shadow-2xl">
+    <div class="flex flex-col gap-6">
+      
+      <!-- Brand & Product Header -->
+      <div class="flex items-center gap-3 px-2 py-1">
+        <div class="w-10 h-10 rounded-2xl bg-[#283d2e] border border-[#3e5b45] flex items-center justify-center shrink-0 shadow-sm text-[#86e2b4]">
+          <span class="material-symbols-outlined text-[24px]">vital_signs</span>
+        </div>
+        <div class="hidden lg:flex flex-col">
+          <span class="font-headline-sm text-lg text-[#e2e6e1] tracking-tight font-bold leading-tight">SepsisGuard</span>
+          <span class="text-[10px] text-[#8da493] font-semibold tracking-wider uppercase">Patient Early-Warning IoT</span>
+        </div>
+      </div>
+
+      <!-- Navigation Links -->
+      <nav id="sidebar-nav" class="flex flex-col gap-2">
+        <!-- 1. Dashboard -->
+        <a href="#dashboard" data-tab="dashboard" class="nav-link flex items-center justify-between px-3 lg:px-4 py-3 rounded-2xl transition-all duration-150 bg-[#344b3a] text-white shadow-[0_4px_16px_rgba(0,0,0,0.3)] border border-[#486650]/60 font-semibold">
+          <div class="flex items-center gap-3">
+            <div class="nav-icon-wrap w-8 h-8 rounded-xl bg-[#e56b43] text-white flex items-center justify-center shrink-0 shadow-sm">
+              <span class="material-symbols-outlined text-[19px]">grid_view</span>
+            </div>
+            <span class="hidden lg:inline text-sm font-semibold tracking-wide">Dashboard</span>
+          </div>
+        </a>
+
+        <!-- 2. History -->
+        <a href="#history" data-tab="history" class="nav-link flex items-center justify-between px-3 lg:px-4 py-3 rounded-2xl text-[#9cb1a2] hover:bg-[#253729] hover:text-white transition-colors duration-150">
+          <div class="flex items-center gap-3">
+            <div class="nav-icon-wrap w-8 h-8 rounded-xl flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-[22px]">history</span>
+            </div>
+            <span class="hidden lg:inline text-sm font-medium">History</span>
+          </div>
+        </a>
+
+        <!-- 3. Reports -->
+        <a href="#reports" data-tab="reports" class="nav-link flex items-center justify-between px-3 lg:px-4 py-3 rounded-2xl text-[#9cb1a2] hover:bg-[#253729] hover:text-white transition-colors duration-150">
+          <div class="flex items-center gap-3">
+            <div class="nav-icon-wrap w-8 h-8 rounded-xl flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-[22px]">description</span>
+            </div>
+            <span class="hidden lg:inline text-sm font-medium">Reports</span>
+          </div>
+        </a>
+
+        <!-- 4. Sensors -->
+        <a href="#sensors" data-tab="sensors" class="nav-link flex items-center justify-between px-3 lg:px-4 py-3 rounded-2xl text-[#9cb1a2] hover:bg-[#253729] hover:text-white transition-colors duration-150">
+          <div class="flex items-center gap-3">
+            <div class="nav-icon-wrap w-8 h-8 rounded-xl flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-[22px]">sensors</span>
+            </div>
+            <span class="hidden lg:inline text-sm font-medium">Sensors</span>
+          </div>
+        </a>
+
+        <!-- 5. Alerts -->
+        <a href="#alerts" data-tab="alerts" class="nav-link flex items-center justify-between px-3 lg:px-4 py-3 rounded-2xl text-[#9cb1a2] hover:bg-[#253729] hover:text-white transition-colors duration-150">
+          <div class="flex items-center gap-3">
+            <div class="nav-icon-wrap w-8 h-8 rounded-xl flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-[22px]">notifications_active</span>
+            </div>
+            <span class="hidden lg:inline text-sm font-medium">Alerts</span>
+          </div>
+          <span id="alert-nav-badge" class="hidden lg:inline px-2 py-0.5 rounded-full bg-[#e56b43]/30 text-[#f59e7f] border border-[#e56b43]/40 text-[11px] font-bold">1</span>
+        </a>
+
+        <!-- 6. Settings -->
+        <a href="#settings" data-tab="settings" class="nav-link flex items-center justify-between px-3 lg:px-4 py-3 rounded-2xl text-[#9cb1a2] hover:bg-[#253729] hover:text-white transition-colors duration-150">
+          <div class="flex items-center gap-3">
+            <div class="nav-icon-wrap w-8 h-8 rounded-xl flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-[22px]">tune</span>
+            </div>
+            <span class="hidden lg:inline text-sm font-medium">Settings</span>
+          </div>
+        </a>
+      </nav>
+    </div>
+
+    <!-- Mini Wearable / Node Avatar Card (Matching Reference Bottom Badge) -->
+    <div class="flex flex-col gap-2 p-3 rounded-2xl bg-[#203124] border border-[#2e4533]/80">
+      <div class="flex items-center gap-2">
+        <div class="relative w-8 h-8 rounded-full bg-[#2d4232] border border-[#44604c] flex items-center justify-center text-[#86e2b4] shrink-0">
+          <span class="material-symbols-outlined text-[17px]">watch</span>
+          <span id="sidebar-dot" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#4edea3] border-2 border-[#203124]"></span>
+          <span id="sidebar-ping" class="hidden animate-ping absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#4edea3] opacity-75"></span>
+        </div>
+        <div class="hidden lg:flex flex-col">
+          <span id="sidebar-conn-text" class="text-xs text-white font-medium truncate">Node 01 • Disconnected</span>
+          <span id="sidebar-mode" class="text-[10px] text-[#7ad4a0]">Unknown</span>
+        </div>
+      </div>
+      <div class="hidden lg:flex items-center justify-between pt-1 text-[#8fa795] border-t border-[#293d2d]">
+        <span class="text-[11px] flex items-center gap-1">
+          <span class="material-symbols-outlined text-[14px] text-[#7ad4a0]">battery_horiz_075</span> Watch
+        </span>
+        <span class="text-[11px] text-white font-semibold">--</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ======================================================= -->
+  <!-- MAIN APPLICATION WRAPPER                                -->
+  <!-- ======================================================= -->
+  <div class="pl-20 md:pl-24 lg:pl-72 min-h-screen py-4 pr-3 pl-3 sm:py-6 sm:pr-6">
+
+    <!-- Top Navigation Header -->
+    <header class="h-14 mb-4 flex items-center justify-between px-2 text-[#dce5df]">
+      <!-- Patient & Bed Context Pill -->
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 bg-[#233527]/90 px-4 py-1.5 rounded-full border border-[#354f3a] shadow-sm backdrop-blur-md">
+          <span class="w-2 h-2 rounded-full bg-[#4edea3] animate-pulse"></span>
+          <span class="text-xs sm:text-sm text-white font-semibold">Device telemetry</span>
+          <span class="text-[#718b77]"></span>
+          <span class="text-xs sm:text-sm text-[#a3bba9]">USB serial</span>
+        </div>
+        <div class="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-[#203224]/80 border border-[#304735] text-[#9bbda7]">
+          <span id="header-status-text" class="text-xs tracking-wide">Serial telemetry</span>
+        </div>
+      </div>
+
+      <!-- No telemetry Clock & Header Controls -->
+      <div class="flex items-center gap-3">
+        <div class="hidden sm:flex items-center gap-1.5 text-[#9bbda7] text-xs sm:text-sm font-medium">
+          <span class="material-symbols-outlined text-[17px]">schedule</span>
+          <span id="header-clock">--:-- --  No telemetry</span>
+        </div>
+
+        <!-- Connect / Disconnect ESP32 Web Serial Button -->
+        <button id="btn-header-serial" class="flex items-center gap-2 px-4 py-2 rounded-full bg-[#243729] hover:bg-[#2e4433] text-[#d6e4d8] border border-[#374e3b] transition-colors font-medium text-xs shadow-sm" type="button">
+          <span class="material-symbols-outlined text-[16px]">usb</span>
+          <span id="btn-header-serial-text">Connect ESP32</span>
+        </button>
+
+        <button id="btn-header-mute" aria-label="Toggle Audio Alerts" class="p-2 rounded-full bg-[#243729] hover:bg-[#2e4433] text-[#a3bba9] hover:text-white border border-[#374e3b] transition-colors" type="button" title="Mute/Unmute Alert Audio">
+          <span class="material-symbols-outlined text-[18px]">volume_off</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Sage Sanctuary Container -->
+    <main class="sage-card-gradient rounded-[2.5rem] border border-[#526f59]/50 p-4 sm:p-6 md:p-8 lg:p-10 shadow-[0_20px_50px_rgba(0,0,0,0.45)] relative overflow-hidden">
+      <!-- Organic Ambient Light Effect -->
+      <div class="absolute inset-0 opacity-15 pointer-events-none bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#76a581] via-transparent to-transparent"></div>
+
+      <div class="flex flex-col w-full relative z-10 gap-6">
+
+        <!-- ======================================================= -->
+        <!-- TAB 1: DASHBOARD                                        -->
+        <!-- ======================================================= -->
+        <div id="tab-dashboard" class="tab-view flex flex-col gap-6">
+
+          <!-- Clinical Vigilance Banner -->
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#526d57]/40 pb-5">
+            <div class="flex items-center gap-2.5 text-[#b9cebe] text-xs sm:text-sm font-medium">
+              <span class="material-symbols-outlined text-[20px] text-[#86e2b4]">spa</span>
+              <span>Research monitoring prototype; no validated clinical score or diagnosis.</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="flex -space-x-2">
+                <div class="w-7 h-7 rounded-full bg-[#2c4031] border-2 border-[#435848] flex items-center justify-center text-[10px] text-white font-bold">SV</div>
+                <div class="w-7 h-7 rounded-full bg-[#3c5443] border-2 border-[#435848] flex items-center justify-center text-[10px] text-white font-bold">RN</div>
+              </div>
+              <span class="text-xs text-[#a7bea9]">Device state shown below</span>
+            </div>
+          </div>
+
+          <!-- Headline & Actions Row -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 class="font-headline-xl text-3xl md:text-4xl text-white font-bold tracking-tight">Patient Monitoring</h1>
+              <p class="font-body-md text-sm md:text-base text-[#b1c7b5] mt-1">ESP32 USB serial readings; no data until a physical device is connected.</p>
+            </div>
+            
+            <div class="flex flex-wrap items-center gap-3">
+            </div>
+          </div>
+
+          <!-- Hero Patient Status Card (Cream Card Gradient) -->
+          <div class="cream-card-gradient rounded-3xl p-6 md:p-8 text-[#18281d] shadow-[0_12px_32px_rgba(0,0,0,0.18)] border border-[#ffffff]/70 transition-all duration-300" id="hero-card">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+              <div class="flex flex-col gap-2 max-w-2xl">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="px-3 py-1 rounded-full bg-[#2d4232] text-[#c2e4ca] text-xs font-bold tracking-wider uppercase">Clinical Vigilance</span>
+                  <span class="text-xs font-semibold text-[#546a5a]">Physical ESP32 telemetry</span>
+                  <span class="text-xs px-2.5 py-0.5 rounded-full bg-[#e7ebe3] text-[#4d6353] font-medium">Research prototype</span>
+                </div>
+                
+                <div class="flex items-center gap-3 mt-1">
+                  <div class="relative flex h-5 w-5" id="status-indicator-dot">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1b804d] opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-5 w-5 bg-[#1b804d] shadow-[0_0_14px_rgba(27,128,77,0.6)]"></span>
+                  </div>
+                  <h2 class="text-2xl md:text-3xl font-headline-lg font-bold text-[#142318] tracking-tight" id="patient-status-text">
+                    MONITORING UNAVAILABLE
+                  </h2>
+                </div>
+
+                <p class="font-body-md text-[#36493c] text-sm md:text-base leading-relaxed" id="patient-status-desc">
+                  No sensor data received. Connect the ESP32 to begin monitoring.
+                </p>
+                <p class="text-xs text-[#6e8574] italic">
+                  Early-warning monitoring support. Clinical attention recommended upon alert trigger. Not a standalone medical diagnosis.
+                </p>
+              </div>
+
+              <!-- Quick Meta Pill Capsule -->
+              <div class="flex flex-wrap lg:flex-col gap-2.5 shrink-0 bg-[#ebe9df]/80 p-3.5 rounded-2xl border border-[#dedbcf]">
+                <div class="flex items-center gap-2 text-xs text-[#2b3e31] font-semibold">
+                  <span class="material-symbols-outlined text-[18px] text-[#2d583b]">timer</span>
+                  <span>Monitored: <strong class="text-[#132017]">Unavailable</strong></span>
+                </div>
+                <div class="flex items-center gap-2 text-xs text-[#2b3e31] font-semibold">
+                  <span class="material-symbols-outlined text-[18px] text-[#2d583b]">battery_charging_90</span>
+                  <span>Watch Battery: <strong class="text-[#132017]">Battery data unavailable</strong></span>
+                </div>
+                <div class="flex items-center gap-2 text-xs text-[#2b3e31] font-semibold">
+                  <span class="material-symbols-outlined text-[18px] text-[#2d583b]">sync</span>
+                  <span>Telemetry Synced: <strong class="text-[#132017]" id="last-sync-time">No data</strong></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Early Warning Alert Banner (Visible on Threshold Breach) -->
+          <div id="alert-banner" class="hidden rounded-3xl p-5 bg-[#3a201c] border-2 border-[#e56b43] text-white alert-pulse-border shadow-lg transition-all duration-300">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-2xl bg-[#e56b43] text-white flex items-center justify-center shrink-0">
+                  <span class="material-symbols-outlined text-[22px]">warning</span>
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-base text-[#fca582]">ATTENTION: Early Warning Alert Triggered</span>
+                    <span class="px-2 py-0.5 rounded-full bg-[#e56b43]/30 text-[#fca582] text-[10px] font-bold uppercase">Priority 1</span>
+                  </div>
+                  <p id="alert-banner-reason" class="text-xs sm:text-sm text-[#e6c4ba] mt-0.5">
+                    Firmware reported an alert. 
+                  </p>
+                </div>
+              </div>
+
+              <!-- Metrics in alert banner -->
+              <div class="flex items-center gap-3 self-end md:self-center">
+                <div class="text-right">
+                  <span class="text-[11px] text-[#d1a89c] block">Temp / Tilt</span>
+                  <span class="text-xs font-bold text-white"><span id="alert-capsule-temp">--</span>  <span id="alert-capsule-orient">--</span></span>
+                </div>
+                <button id="btn-alert-ack" class="px-4 py-2 rounded-full bg-[#e56b43] hover:bg-[#d45d37] text-white text-xs font-bold shadow-md transition-all active:scale-95" type="button">
+                  Acknowledge Alert
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Biosensor Vitals Cards Grid -->
+          <div>
+            <div class="flex items-center justify-between mb-3 text-white">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[20px] text-[#86e2b4]">monitor_heart</span>
+                <span class="font-headline-sm text-lg font-semibold tracking-tight">Key Biosensor Vitals</span>
+              </div>
+              <span class="text-xs text-[#b0c7b4]">Serial data only  XIAO ESP32-C3</span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              
+              <!-- Vital Card 1: Temperature (TMP117) -->
+              <div class="sensor-card cream-card-gradient text-[#18281d] rounded-3xl p-5 shadow-[0_10px_25px_rgba(0,0,0,0.12)] border border-[#ffffff]/70 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-200 cursor-pointer" data-sensor="temperature">
+                <div>
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs uppercase tracking-wider font-bold text-[#566c5c]">Skin Temp  TMP117</span>
+                    <span class="material-symbols-outlined text-[18px] text-[#566c5c]">call_made</span>
+                  </div>
+                  <div class="mt-3">
+                    <span id="badge-temp-status" class="text-xs text-[#677e6e] font-medium">No data</span>
+                    <div class="flex items-baseline gap-1 my-1">
+                      <span class="text-4xl font-extrabold text-[#142318] tracking-tight tabular-nums" id="metric-temp">--</span>
+                      <span class="text-xl font-bold text-[#445b4a]">Â°C</span>
+                    </div>
+                  </div>
+                  <p class="text-xs text-[#5f7565]">No validated clinical threshold</p>
+                </div>
+
+                <div class="my-3">
+                  <svg id="sparkline-temp" class="w-full h-8 overflow-visible" fill="none" viewBox="0 0 160 30"></svg>
+                </div>
+
+                <div class="flex items-center justify-between pt-2 border-t border-[#e2e0d3] text-xs text-[#6e8574]">
+                  <span>Â±0.1Â°C precision</span>
+                  <span>Status unknown</span>
+                </div>
+              </div>
+
+              <!-- Vital Card 2: Heart Rate (MAX30102) -->
+              <div class="sensor-card cream-card-gradient text-[#18281d] rounded-3xl p-5 shadow-[0_10px_25px_rgba(0,0,0,0.12)] border border-[#ffffff]/70 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-200 cursor-pointer" data-sensor="heartrate">
+                <div>
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs uppercase tracking-wider font-bold text-[#566c5c]">Pulse / PPG  MAX30102</span>
+                    <span class="material-symbols-outlined text-[18px] text-[#566c5c]">call_made</span>
+                  </div>
+                  <div class="mt-3">
+                    <span id="badge-hr-status" class="text-xs text-[#677e6e] font-medium">No data</span>
+                    <div class="flex items-baseline gap-1 my-1">
+                      <span class="text-4xl font-extrabold text-[#142318] tracking-tight tabular-nums" id="metric-hr">--</span>
+                      <span class="text-xl font-bold text-[#445b4a]">BPM</span>
+                    </div>
+                  </div>
+                  <p class="text-xs text-[#5f7565]">No clinical interpretation is provided.</p>
+                </div>
+
+                <div class="my-3">
+                  <svg id="sparkline-hr" class="w-full h-8 overflow-visible" fill="none" viewBox="0 0 160 30"></svg>
+                </div>
+
+                <div class="flex items-center justify-between pt-2 border-t border-[#e2e0d3] text-xs text-[#6e8574]">
+                  <span id="badge-hr-sub">No data</span>
+                  <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#1b804d] animate-ping"></span> No data</span>
+                </div>
+              </div>
+
+              <!-- Vital Card 3: Posture Tilt (MPU6050) -->
+              <div class="sensor-card cream-card-gradient text-[#18281d] rounded-3xl p-5 shadow-[0_10px_25px_rgba(0,0,0,0.12)] border border-[#ffffff]/70 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-200 cursor-pointer" data-sensor="orientation">
+                <div>
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs uppercase tracking-wider font-bold text-[#566c5c]">Posture Tilt  MPU6050</span>
+                    <span class="material-symbols-outlined text-[18px] text-[#566c5c]">call_made</span>
+                  </div>
+                  <div class="mt-3">
+                    <span id="badge-orient-status" class="text-xs text-[#677e6e] font-medium">No data</span>
+                    <div class="flex items-baseline gap-1 my-1">
+                      <span class="text-4xl font-extrabold text-[#142318] tracking-tight tabular-nums" id="metric-angle">--</span>
+                      <span class="text-xl font-bold text-[#445b4a]">Â°</span>
+                    </div>
+                  </div>
+                  <p class="text-xs text-[#5f7565]">Limit: Â±90Â°  Low Decubitus Risk</p>
+                </div>
+
+                <div class="my-3">
+                  <svg id="sparkline-orient" class="w-full h-8 overflow-visible" fill="none" viewBox="0 0 160 30"></svg>
+                </div>
+
+                <div class="flex items-center justify-between pt-2 border-t border-[#e2e0d3] text-xs text-[#6e8574]">
+                  <span>No data</span>
+                  <span>Status unknown</span>
+                </div>
+              </div>
+
+              <!-- Vital Card 4: Motion State (MPU6050) -->
+              <div class="sensor-card cream-card-gradient text-[#18281d] rounded-3xl p-5 shadow-[0_10px_25px_rgba(0,0,0,0.12)] border border-[#ffffff]/70 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-200 cursor-pointer" data-sensor="motion">
+                <div>
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs uppercase tracking-wider font-bold text-[#566c5c]">Inertial State  MPU6050</span>
+                    <span class="material-symbols-outlined text-[18px] text-[#566c5c]">call_made</span>
+                  </div>
+                  <div class="mt-3">
+                    <span class="text-xs text-[#677e6e] font-medium">Kinetic Stability</span>
+                    <div class="flex items-baseline gap-1 my-1">
+                      <span class="text-4xl font-extrabold text-[#142318] tracking-tight" id="metric-motion-state">No data</span>
+                    </div>
+                  </div>
+                  <p class="text-xs text-[#5f7565] truncate" id="metric-accel-text">Unavailable</p>
+                </div>
+
+                <div class="my-3 h-8"></div>
+
+                <div class="flex items-center justify-between pt-2 border-t border-[#e2e0d3] text-xs text-[#6e8574]">
+                  <span>No motion data</span>
+                  <span>Rate unreported</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <section class="rounded-3xl bg-[#364b3c]/80 border border-[#4d6954] p-5 text-white"><h2 class="font-semibold mb-3">Additional ESP32 telemetry</h2><div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm"><div>IR signal: <strong id="metric-ir">--</strong></div><div>RED signal: <strong id="metric-red">--</strong></div><div>Gyroscope: <strong id="metric-gyro">Unavailable</strong></div><div>Battery: <strong id="metric-battery">Battery data unavailable</strong></div></div><p class="text-xs text-[#b1c7b5] mt-3">Firmware alert: <strong id="metric-alert">Unknown</strong></p></section>
+
+          <!-- Lower Section: Activity Stream & Sensor Bus Health -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <!-- Telemetry Activity Stream (7 cols) -->
+            <div class="lg:col-span-7 flex flex-col gap-3">
+              <div class="flex items-center justify-between px-1 text-white">
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-[20px] text-[#86e2b4]">timeline</span>
+                  <h3 class="font-headline-sm text-lg font-semibold">Telemetry Activity Stream</h3>
+                </div>
+                <span class="text-xs text-[#a7c0ad]">Serial event log</span>
+              </div>
+
+              <div id="recent-activity-list" class="flex flex-col gap-2.5 rounded-3xl bg-[#374c3d]/90 border border-[#4d6853] p-4 shadow-sm">
+                <!-- Dynamically populated via renderTimeline() -->
+              </div>
+            </div>
+
+            <!-- Sensor Bus Health & Attending Clinician (5 cols) -->
+            <div class="lg:col-span-5 flex flex-col gap-3">
+              <div class="flex items-center justify-between px-1 text-white">
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-[20px] text-[#86e2b4]">sensors</span>
+                  <h3 class="font-headline-sm text-lg font-semibold">Sensor Bus Health</h3>
+                </div>
+                <span class="text-xs text-[#86e2b4] font-semibold uppercase">I2C 400kHz</span>
+              </div>
+
+              <div class="flex flex-col gap-2 rounded-3xl bg-[#374c3d]/90 border border-[#4d6853] p-4 shadow-sm">
+                <!-- TMP117 -->
+                <div class="flex items-center justify-between p-2.5 rounded-2xl bg-[#435c4b]/40 border border-[#4d6a54]/30">
+                  <div class="flex items-center gap-2.5">
+                    <span class="material-symbols-outlined text-[#86e2b4] text-[18px]">thermostat</span>
+                    <div class="flex flex-col">
+                      <span class="text-xs text-white font-semibold">TMP117 Skin/Core Temp</span>
+                      <span class="text-[11px] text-[#a4bda9]">Bus: 0x48  GPIO6/GPIO7</span>
+                    </div>
+                  </div>
+                  <span id="sensor-pill-tmp117" class="px-2.5 py-0.5 rounded-full bg-[#273d2d] text-[#86e2b4] text-[11px] font-semibold">Unknown</span>
+                </div>
+
+                <!-- MAX30102 -->
+                <div class="flex items-center justify-between p-2.5 rounded-2xl bg-[#435c4b]/40 border border-[#4d6a54]/30">
+                  <div class="flex items-center gap-2.5">
+                    <span class="material-symbols-outlined text-[#86e2b4] text-[18px]">monitor_heart</span>
+                    <div class="flex flex-col">
+                      <span class="text-xs text-white font-semibold">MAX30102 Pulse &amp; PPG</span>
+                      <span class="text-[11px] text-[#a4bda9]">Bus: 0x57  Sample: 100Hz</span>
+                    </div>
+                  </div>
+                  <span id="sensor-pill-max30102" class="px-2.5 py-0.5 rounded-full bg-[#273d2d] text-[#86e2b4] text-[11px] font-semibold">Unknown</span>
+                </div>
+
+                <!-- MPU6050 -->
+                <div class="flex items-center justify-between p-2.5 rounded-2xl bg-[#435c4b]/40 border border-[#4d6a54]/30">
+                  <div class="flex items-center gap-2.5">
+                    <span class="material-symbols-outlined text-[#86e2b4] text-[18px]">screen_rotation</span>
+                    <div class="flex flex-col">
+                      <span class="text-xs text-white font-semibold">MPU6050 6-DoF IMU</span>
+                      <span class="text-[11px] text-[#a4bda9]">Bus: 0x68  Tilt + Gyro</span>
+                    </div>
+                  </div>
+                  <span id="sensor-pill-mpu6050" class="px-2.5 py-0.5 rounded-full bg-[#273d2d] text-[#86e2b4] text-[11px] font-semibold">Unknown</span>
+                </div>
+
+                <!-- SSD1306 OLED -->
+                <div class="flex items-center justify-between p-2.5 rounded-2xl bg-[#435c4b]/40 border border-[#4d6a54]/30">
+                  <div class="flex items-center gap-2.5">
+                    <span class="material-symbols-outlined text-[#86e2b4] text-[18px]">tv</span>
+                    <div class="flex flex-col">
+                      <span class="text-xs text-white font-semibold">SSD1306 Patient OLED</span>
+                      <span class="text-[11px] text-[#a4bda9]">Bus: 0x3C  Bedside Sync</span>
+                    </div>
+                  </div>
+                  <span id="sensor-pill-ssd1306" class="px-2.5 py-0.5 rounded-full bg-[#273d2d] text-[#86e2b4] text-[11px] font-semibold">Unknown</span>
+                </div>
+
+                <!-- Buzzer -->
+                <div class="flex items-center justify-between p-2.5 rounded-2xl bg-[#435c4b]/40 border border-[#4d6a54]/30">
+                  <div class="flex items-center gap-2.5">
+                    <span class="material-symbols-outlined text-[#c7ebd4] text-[18px]">campaign</span>
+                    <div class="flex flex-col">
+                      <span class="text-xs text-white font-semibold">Piezo Buzzer Interlock</span>
+                      <span class="text-[11px] text-[#a4bda9]">Buzzer status: firmware reported only</span>
+                    </div>
+                  </div>
+                  <span id="sensor-pill-buzzer" class="px-2.5 py-0.5 rounded-full bg-[#24382a] text-[#cfe9d6] text-[11px] font-semibold">Unknown</span>
+                </div>
+              </div>
+
+              <!-- Attending Clinician Card (Clean Cream Card from Reference) -->
+              <div class="cream-card-gradient rounded-3xl p-4 text-[#18281d] shadow-sm border border-[#ffffff]/70 flex items-center justify-between gap-3 mt-1">
+                <div class="flex items-center gap-3">
+                  <div class="relative w-12 h-12 rounded-2xl bg-[#283b2e] border border-[#b6c7b9] flex items-center justify-center text-white font-bold text-base shrink-0">
+                    SV
+                    <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#268a52] border-2 border-white"></span>
+                  </div>
+                  <div class="flex flex-col">
+                    <span class="text-sm text-[#142318] font-bold">Research device</span>
+                    <span class="text-xs text-[#526a57]">Research contact  On Duty</span>
+                  </div>
+                </div>
+                <button id="btn-page-doctor" class="px-4 py-2 rounded-full bg-[#273d2e] hover:bg-[#1a2d1f] text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer" type="button">
+                  Page Doctor
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /#tab-dashboard -->
+
+
+        <!-- ======================================================= -->
+        <!-- TAB 2: HISTORY                                          -->
+        <!-- ======================================================= -->
+        <div id="tab-history" class="tab-view hidden flex flex-col gap-6">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#526d57]/40 pb-5">
+            <div>
+              <h2 class="font-headline-xl text-2xl md:text-3xl text-white font-bold tracking-tight">Patient Telemetry History</h2>
+              <p class="text-sm text-[#b1c7b5] mt-1">Historical sensor logs, waveform graphs and physiological timelines</p>
+            </div>
+            
+            <!-- Filters -->
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="flex items-center gap-1 bg-[#233527]/90 p-1 rounded-full border border-[#354f3a]">
+                <button class="hist-metric-btn px-4 py-1.5 rounded-full text-xs font-semibold bg-[#e56b43] text-white shadow-sm" data-metric="temperature">Temperature</button>
+                <button class="hist-metric-btn px-4 py-1.5 rounded-full text-xs font-semibold border border-transparent text-[#b2ceba] hover:bg-[#2e4533] transition-colors" data-metric="heartRate">Heart Rate</button>
+                <button class="hist-metric-btn px-4 py-1.5 rounded-full text-xs font-semibold border border-transparent text-[#b2ceba] hover:bg-[#2e4533] transition-colors" data-metric="orientation">Orientation</button>
+                <button class="hist-metric-btn px-4 py-1.5 rounded-full text-xs font-semibold border border-transparent text-[#b2ceba] hover:bg-[#2e4533] transition-colors" data-metric="irValue">PPG IR</button>
+                <button class="hist-metric-btn px-4 py-1.5 rounded-full text-xs font-semibold border border-transparent text-[#b2ceba] hover:bg-[#2e4533] transition-colors" data-metric="redValue">PPG RED</button>
+              </div>
+
+              <div class="flex items-center gap-1 bg-[#233527]/90 p-1 rounded-full border border-[#354f3a]">
+                <button class="hist-time-btn px-3 py-1.5 rounded-full text-xs font-semibold border border-transparent text-[#b2ceba] hover:bg-[#2e4533]" data-window="15m">15m</button>
+                <button class="hist-time-btn px-3 py-1.5 rounded-full text-xs font-semibold border border-transparent text-[#b2ceba] hover:bg-[#2e4533]" data-window="1h">1h</button>
+                <button class="hist-time-btn px-3 py-1.5 rounded-full text-xs font-semibold border border-transparent text-[#b2ceba] hover:bg-[#2e4533]" data-window="today">Today</button>
+                <button class="hist-time-btn px-3 py-1.5 rounded-full text-xs font-semibold bg-[#344b3a] text-white shadow-sm border border-[#52775b]" data-window="all">All</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Waveform Chart Container -->
+          <div id="history-chart-container" class="w-full"></div>
+
+          <!-- Stored Records Table -->
+          <div class="rounded-3xl bg-[#374c3d]/90 border border-[#4d6853] p-5 shadow-sm text-white">
+            <div class="flex items-center justify-between pb-3 border-b border-[#4d6853]">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[20px] text-[#86e2b4]">table_chart</span>
+                <span class="font-headline-sm font-bold text-base">Recorded Telemetry Frames</span>
+              </div>
+              <span id="hist-total-count" class="text-xs text-[#a3bfa9] font-semibold bg-[#243729] px-3 py-1 rounded-full">0 Records</span>
+            </div>
+
+            <div class="overflow-x-auto mt-3 max-h-96">
+              <table class="w-full text-left border-collapse">
+                <thead class="sticky top-0 bg-[#2b3d30] text-[#a7bea9] text-xs uppercase tracking-wider">
+                  <tr>
+                    <th class="py-2.5 px-3">Time</th>
+                    <th class="py-2.5 px-3">Temperature</th>
+                    <th class="py-2.5 px-3">Heart Rate</th>
+                    <th class="py-2.5 px-3">Orientation</th>
+                    <th class="py-2.5 px-3">MPU6050</th>
+                    <th class="py-2.5 px-3">Buzzer</th>
+                  </tr>
+                </thead>
+                <tbody id="history-table-body" class="divide-y divide-[#425948]"></tbody>
+              </table>
+            </div>
+          </div>
+        </div><!-- /#tab-history -->
+
+
+        <!-- ======================================================= -->
+        <!-- TAB 3: REPORTS                                          -->
+        <!-- ======================================================= -->
+        <div id="tab-reports" class="tab-view hidden flex flex-col gap-6">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#526d57]/40 pb-5">
+            <div>
+              <h2 class="font-headline-xl text-2xl md:text-3xl text-white font-bold tracking-tight">Patient Telemetry Reports</h2>
+              <p class="text-sm text-[#b1c7b5] mt-1">Clinical summary aggregation, statistical trends, and CSV dataset export</p>
+            </div>
+            
+            <div class="flex items-center gap-3">
+              <button id="btn-report-export-csv" class="flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e56b43] hover:bg-[#d45d37] text-white text-xs font-bold shadow-md transition-all cursor-pointer">
+                <span class="material-symbols-outlined text-[17px]">download</span>
+                <span>Export CSV</span>
+              </button>
+              <button id="btn-report-print" class="flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#35493b] hover:bg-[#2c3e32] text-[#d6e4d8] text-xs font-semibold border border-[#4e6a54] transition-colors cursor-pointer">
+                <span class="material-symbols-outlined text-[17px]">print</span>
+                <span>Print Report</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Report Scope Filter -->
+          <div class="flex flex-wrap items-center gap-4 bg-[#374c3d]/90 p-4 rounded-3xl border border-[#4d6853] text-sm text-white">
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-[#a3bfa9] uppercase font-bold">Report Scope:</span>
+              <select id="report-select-type" class="bg-[#243729] border border-[#4d6a54] rounded-xl px-3 py-1.5 text-xs text-white font-medium focus:outline-none">
+                <option value="complete">Complete Patient Telemetry</option>
+                <option value="temperature">Temperature Only (TMP117)</option>
+                <option value="heartrate">Heart Rate (MAX30102)</option>
+                <option value="orientation">Orientation &amp; Posture (MPU6050)</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-[#a3bfa9] uppercase font-bold">Time Window:</span>
+              <select id="report-select-window" class="bg-[#243729] border border-[#4d6a54] rounded-xl px-3 py-1.5 text-xs text-white font-medium focus:outline-none">
+                <option value="all">All Stored Data</option>
+                <option value="today">Today</option>
+                <option value="1h">Last 1 Hour</option>
+                <option value="15m">Last 15 Minutes</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Statistical Summary Cards (6-Pill Responsive Grid) -->
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div class="cream-card-gradient rounded-3xl p-4 text-[#18281d] border border-white/70 shadow-sm">
+              <span class="text-xs text-[#526a57] font-semibold uppercase block">Total Readings</span>
+              <span id="rep-stat-readings" class="text-2xl font-extrabold text-[#142318] block mt-1">0</span>
+            </div>
+            <div class="cream-card-gradient rounded-3xl p-4 text-[#18281d] border border-white/70 shadow-sm">
+              <span class="text-xs text-[#526a57] font-semibold uppercase block">Temp Min / Max</span>
+              <span id="rep-stat-temp-range" class="text-lg font-bold text-[#142318] block mt-1">-- / --</span>
+            </div>
+            <div class="cream-card-gradient rounded-3xl p-4 text-[#18281d] border border-white/70 shadow-sm">
+              <span class="text-xs text-[#526a57] font-semibold uppercase block">Average Temp</span>
+              <span id="rep-stat-temp-avg" class="text-2xl font-extrabold text-[#142318] block mt-1">-- Â°C</span>
+            </div>
+            <div class="cream-card-gradient rounded-3xl p-4 text-[#18281d] border border-white/70 shadow-sm">
+              <span class="text-xs text-[#526a57] font-semibold uppercase block">Heart Rate Avg</span>
+              <span id="rep-stat-hr-avg" class="text-2xl font-extrabold text-[#142318] block mt-1">-- BPM</span>
+            </div>
+            <div class="cream-card-gradient rounded-3xl p-4 text-[#18281d] border border-white/70 shadow-sm">
+              <span class="text-xs text-[#526a57] font-semibold uppercase block">Tilt Range</span>
+              <span id="rep-stat-orient-range" class="text-xl font-bold text-[#142318] block mt-1">--</span>
+            </div>
+            <div class="cream-card-gradient rounded-3xl p-4 text-[#18281d] border border-white/70 shadow-sm">
+              <span class="text-xs text-[#b5261d] font-bold uppercase block">Warning Events</span>
+              <span id="rep-stat-alerts" class="text-2xl font-extrabold text-[#b5261d] block mt-1">0</span>
+            </div>
+          </div>
+
+          <!-- Report Data Preview Table -->
+          <div class="rounded-3xl bg-[#374c3d]/90 border border-[#4d6853] p-5 shadow-sm text-white">
+            <div class="flex items-center justify-between pb-3 border-b border-[#4d6853]">
+              <span class="font-headline-sm font-bold text-base">Report Preview (Recent 40 Records)</span>
+              <span class="text-xs text-[#a3bfa9]">RFC 4180 Format</span>
+            </div>
+            <div class="overflow-x-auto mt-3 max-h-96">
+              <table class="report-table w-full text-left border-collapse">
+                <thead class="sticky top-0 bg-[#2b3d30] text-[#a7bea9] text-xs uppercase tracking-wider">
+                  <tr>
+                    <th class="py-2.5 px-3">Timestamp</th>
+                    <th class="py-2.5 px-3">Temperature</th>
+                    <th class="py-2.5 px-3">Heart Rate</th>
+                    <th class="py-2.5 px-3">Orientation</th>
+                    <th class="py-2.5 px-3">MPU6050 Status</th>
+                    <th class="py-2.5 px-3">Buzzer Event</th>
+                  </tr>
+                </thead>
+                <tbody id="report-table-body" class="divide-y divide-[#425948]"></tbody>
+              </table>
+            </div>
+          </div>
+        </div><!-- /#tab-reports -->
+
+
+        <!-- ======================================================= -->
+        <!-- TAB 4: SENSORS                                          -->
+        <!-- ======================================================= -->
+        <div id="tab-sensors" class="tab-view hidden flex flex-col gap-6">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#526d57]/40 pb-5">
+            <div>
+              <h2 class="font-headline-xl text-2xl md:text-3xl text-white font-bold tracking-tight">Sensor Hardware Architecture</h2>
+              <p class="text-sm text-[#b1c7b5] mt-1">Seeed Studio XIAO ESP32-C3 Mini  I2C Bus Mapping (SDA GPIO6 / SCL GPIO7)</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="px-3 py-1 rounded-full bg-[#273d2d] text-[#86e2b4] text-xs font-semibold border border-[#3b5742]">Bus Active 400kHz</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            <!-- Sensor 1: TMP117 -->
+            <div class="cream-card-gradient rounded-3xl p-6 text-[#18281d] border border-white/70 shadow-sm flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between pb-3 border-b border-[#dedbcf]">
+                  <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[#2d583b]">thermostat</span>
+                    <span class="font-bold text-base text-[#142318]">TMP117 Clinical Temperature Sensor</span>
+                  </div>
+                  <span class="px-2.5 py-0.5 rounded-full bg-[#2d4232] text-[#c2e4ca] text-xs font-bold uppercase">Unknown</span>
+                </div>
+                <div class="mt-3 space-y-1.5 text-xs text-[#36493c]">
+                  <p><strong>I2C Address:</strong> 0x48 (SDA GPIO6 / SCL GPIO7)</p>
+                  <p><strong>Accuracy:</strong> Â±0.1Â°C (-20Â°C to +50Â°C, ASTM E1112 certified)</p>
+                  <p>Firmware threshold: not verified.</p>
+                  <p><strong>Sampling Rate:</strong> 1000ms loop</p>
+                </div>
+              </div>
+              <button class="open-modal-btn mt-4 px-4 py-2 rounded-full bg-[#273d2e] hover:bg-[#1a2d1f] text-white text-xs font-semibold shadow-sm transition-colors self-start cursor-pointer" data-sensor="temperature">
+                Open Temperature Diagnostics â†’
+              </button>
+            </div>
+
+            <!-- Sensor 2: MAX30102 -->
+            <div class="cream-card-gradient rounded-3xl p-6 text-[#18281d] border border-white/70 shadow-sm flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between pb-3 border-b border-[#dedbcf]">
+                  <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[#2d583b]">monitor_heart</span>
+                    <span class="font-bold text-base text-[#142318]">MAX30102 PPG Sensor • Heart Rate only if reported</span>
+                  </div>
+                  <span class="px-2.5 py-0.5 rounded-full bg-[#e3eae4] text-[#4d6353] text-xs font-semibold uppercase">Status requires firmware report</span>
+                </div>
+                <div class="mt-3 space-y-1.5 text-xs text-[#36493c]">
+                  <p><strong>I2C Address:</strong> 0x57 (SDA GPIO6 / SCL GPIO7)</p>
+                  <p><strong>Technology:</strong> Dual Red &amp; IR PPG Optical Sensing</p>
+                  <p><strong>Display Logic:</strong> Displays BPM only when firmware reports it; otherwise unavailable</p>
+                  <p><strong>Sampling Rate:</strong> Rate unreported PPG</p>
+                </div>
+              </div>
+              <button class="open-modal-btn mt-4 px-4 py-2 rounded-full bg-[#273d2e] hover:bg-[#1a2d1f] text-white text-xs font-semibold shadow-sm transition-colors self-start cursor-pointer" data-sensor="heartrate">
+                Open Heart Rate Diagnostics â†’
+              </button>
+            </div>
+
+            <!-- Sensor 3: MPU6050 -->
+            <div class="cream-card-gradient rounded-3xl p-6 text-[#18281d] border border-white/70 shadow-sm flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between pb-3 border-b border-[#dedbcf]">
+                  <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[#2d583b]">screen_rotation</span>
+                    <span class="font-bold text-base text-[#142318]">MPU6050 6-Axis Motion / Posture Sensor</span>
+                  </div>
+                  <span class="px-2.5 py-0.5 rounded-full bg-[#2d4232] text-[#c2e4ca] text-xs font-bold uppercase">Unknown</span>
+                </div>
+                <div class="mt-3 space-y-1.5 text-xs text-[#36493c]">
+                  <p><strong>I2C Address:</strong> 0x68 (SDA GPIO6 / SCL GPIO7)</p>
+                  <p><strong>Degrees of Freedom:</strong> 3-Axis Accel (Â±2g) + 3-Axis Gyro (Â±250Â°/s)</p>
+                  <p>Firmware threshold: not verified.</p>
+                  <p><strong>Bed-Exit Monitoring:</strong> Angle displayed only when firmware reports it.</p>
+                </div>
+              </div>
+              <button class="open-modal-btn mt-4 px-4 py-2 rounded-full bg-[#273d2e] hover:bg-[#1a2d1f] text-white text-xs font-semibold shadow-sm transition-colors self-start cursor-pointer" data-sensor="orientation">
+                Open Posture Diagnostics â†’
+              </button>
+            </div>
+
+            <!-- Peripherals: SSD1306 & Piezo Buzzer -->
+            <div class="cream-card-gradient rounded-3xl p-6 text-[#18281d] border border-white/70 shadow-sm flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between pb-3 border-b border-[#dedbcf]">
+                  <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[#2d583b]">campaign</span>
+                    <span class="font-bold text-base text-[#142318]">SSD1306 Display &amp; Buzzer Interlock</span>
+                  </div>
+                  <span class="px-2.5 py-0.5 rounded-full bg-[#2d4232] text-[#c2e4ca] text-xs font-bold uppercase">Unknown</span>
+                </div>
+                <div class="mt-3 space-y-1.5 text-xs text-[#36493c]">
+                  <p><strong>OLED Display:</strong> SSD1306 I2C (Address 0x3C) 128x64</p>
+                  <p><strong>Hardware Buzzer Pin:</strong> Not verified from firmware (Digital Output, Active HIGH)</p>
+                  <p><strong>User Push Button:</strong> GPIO5 / D3 (Tactile Interrupt)</p>
+                  <p><strong>Firmware Logic:</strong> <code class="bg-[#e4ebd8] px-1.5 py-0.5 rounded">Firmware status comes from serial only.</code></p>
+                </div>
+              </div>
+              <button class="open-modal-btn mt-4 px-4 py-2 rounded-full bg-[#273d2e] hover:bg-[#1a2d1f] text-white text-xs font-semibold shadow-sm transition-colors self-start cursor-pointer" data-sensor="buzzer">
+                Open Buzzer Diagnostics â†’
+              </button>
+            </div>
+
+          </div>
+        </div><!-- /#tab-sensors -->
+
+
+        <!-- ======================================================= -->
+        <!-- TAB 5: ALERTS                                           -->
+        <!-- ======================================================= -->
+        <div id="tab-alerts" class="tab-view hidden flex flex-col gap-6">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#526d57]/40 pb-5">
+            <div>
+              <h2 class="font-headline-xl text-2xl md:text-3xl text-white font-bold tracking-tight">Active Alerts &amp; Clinical Audit Log</h2>
+              <p class="text-sm text-[#b1c7b5] mt-1">Real-time early-warning notifications, trigger events, and staff acknowledgments</p>
+            </div>
+            
+            <div class="flex items-center gap-2">
+              <button class="alert-filter-btn px-4 py-1.5 rounded-full text-xs font-semibold bg-[#e56b43] text-white shadow-sm" data-filter="all">All</button>
+              <button class="alert-filter-btn px-4 py-1.5 rounded-full text-xs font-semibold border border-[#486650]/60 text-[#b2ceba] hover:bg-[#2e4533] transition-colors" data-filter="unacknowledged">Unacknowledged</button>
+              <button class="alert-filter-btn px-4 py-1.5 rounded-full text-xs font-semibold border border-[#486650]/60 text-[#b2ceba] hover:bg-[#2e4533] transition-colors" data-filter="acknowledged">Acknowledged</button>
+            </div>
+          </div>
+
+          <div class="rounded-3xl bg-[#374c3d]/90 border border-[#4d6853] p-5 shadow-sm text-white">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead class="bg-[#2b3d30] text-[#a7bea9] text-xs uppercase tracking-wider">
+                  <tr>
+                    <th class="py-3 px-3">Trigger Time</th>
+                    <th class="py-3 px-3">Trigger / Reason</th>
+                    <th class="py-3 px-3">Hardware Buzzer</th>
+                    <th class="py-3 px-3">Temp Recorded</th>
+                    <th class="py-3 px-3">Status</th>
+                    <th class="py-3 px-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="alerts-page-table-body" class="divide-y divide-[#425948]"></tbody>
+              </table>
+            </div>
+          </div>
+        </div><!-- /#tab-alerts -->
+
+
+        <!-- ======================================================= -->
+        <!-- TAB 6: SETTINGS                                         -->
+        <!-- ======================================================= -->
+        <div id="tab-settings" class="tab-view hidden flex flex-col gap-6">
+          <div class="border-b border-[#526d57]/40 pb-5">
+            <h2 class="font-headline-xl text-2xl md:text-3xl text-white font-bold tracking-tight">System Settings &amp; Diagnostics</h2>
+            <p class="text-sm text-[#b1c7b5] mt-1">Web Serial parameters, physical USB serial configuration and diagnostics</p>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            
+            <!-- Hardware Connection Card -->
+            <div class="cream-card-gradient rounded-3xl p-6 text-[#18281d] border border-white/70 shadow-sm flex flex-col justify-between">
+              <div>
+                <div class="flex items-center gap-2 pb-3 border-b border-[#dedbcf]">
+                  <span class="material-symbols-outlined text-[#2d583b]">cable</span>
+                  <span class="font-bold text-base text-[#142318]">ESP32 Hardware Connection</span>
+                </div>
+                <div class="mt-4 space-y-2.5 text-xs text-[#36493c]">
+                  <div class="flex justify-between">
+                    <span>Microcontroller:</span>
+                    <strong class="text-[#142318]">Seeed Studio XIAO ESP32-C3 Mini</strong>
+                  </div>
+                  <div class="flex justify-between">
+                    <span>Protocol:</span>
+                    <strong class="text-[#142318]">Web Serial (115200 Baud, 8N1)</strong>
+                  </div>
+                  <div class="flex justify-between">
+                    <span>Temperature Threshold:</span>
+                    <strong class="text-[#142318]">Not configured by dashboard</strong>
+                  </div>
+                  <div class="flex justify-between">
+                    <span>Orientation Threshold:</span>
+                    <strong class="text-[#142318]">ÂNot configured by dashboard</strong>
+                  </div>
+                  <div class="flex justify-between">
+                    <span>Buzzer hardware pin (unverified):</span>
+                    <strong class="text-[#142318]">Not verified from firmware</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-6 pt-4 border-t border-[#dedbcf] flex items-center gap-3">
+                <button id="btn-settings-connect" class="px-5 py-2.5 rounded-full bg-[#273d2e] hover:bg-[#1a2d1f] text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer">
+                  Connect ESP32 (Web Serial)
+                </button>
+                <button id="btn-settings-disconnect" class="px-4 py-2.5 rounded-full bg-transparent hover:bg-[#e4eade] text-[#273d2e] border border-[#273d2e] text-xs font-semibold transition-colors cursor-pointer">
+                  Disconnect
+                </button>
+              </div>
+            </div>
+
+            <div class="cream-card-gradient rounded-3xl p-6 text-[#18281d] border border-white/70 shadow-sm"><h3 class="font-bold text-base">Telemetry storage</h3><p class="text-xs mt-2">History contains serial readings received from the ESP32 only.</p><button id="btn-clear-history" class="mt-5 text-xs text-[#b5261d] font-bold">Clear Local History</button></div>
+
+          <!-- Raw Serial Terminal Monitor -->
+          <div class="rounded-3xl bg-[#374c3d]/90 border border-[#4d6853] p-5 shadow-sm text-white">
+            <div class="flex items-center justify-between pb-3 border-b border-[#4d6853]">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[18px] text-[#86e2b4]">terminal</span>
+                <span class="font-headline-sm font-bold text-sm">Raw Serial Terminal (115200 Baud)</span>
+              </div>
+              <button id="btn-clear-terminal" class="text-xs text-[#a3bfa9] hover:text-white cursor-pointer">
+                [ Clear Buffer ]
+              </button>
+            </div>
+            <div id="raw-terminal" class="mt-3 h-52 overflow-y-auto bg-[#17241a] rounded-2xl p-4 font-mono text-xs text-[#c2e4ca] space-y-1 select-text">
+              <div class="text-[#8da493]">[Ready. Connect ESP32 via USB Serial or wait for serial telemetry...]</div>
+            </div>
+          </div>
+        </div><!-- /#tab-settings -->
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ======================================================= -->
+  <!-- SENSOR DETAIL DIAGNOSTIC MODAL                          -->
+  <!-- ======================================================= -->
+  <div id="sensor-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
+    <div class="cream-card-gradient text-[#18281d] rounded-[2rem] border border-white/70 max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col">
+      <!-- Modal Header -->
+      <div class="px-6 py-4 border-b border-[#dedbcf] flex items-center justify-between bg-[#f0f2eb]">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[#2d583b] text-[22px]">analytics</span>
+          <span id="modal-title" class="font-bold text-base text-[#142318]">Sensor Diagnostics</span>
+        </div>
+        <button id="btn-close-modal" class="text-[#526a57] hover:text-[#142318] text-2xl font-bold leading-none p-1 cursor-pointer">
+          &times;
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-6 flex flex-col gap-5 max-h-[75vh] overflow-y-auto">
+        <!-- 4 Badges -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="p-3 bg-white/80 border border-[#dedbcf] rounded-2xl">
+            <span class="text-[11px] font-bold text-[#526a57] uppercase block">Current</span>
+            <span id="modal-val-curr" class="text-xl font-extrabold text-[#142318] mt-1 block">--</span>
+          </div>
+          <div class="p-3 bg-white/80 border border-[#dedbcf] rounded-2xl">
+            <span class="text-[11px] font-bold text-[#526a57] uppercase block">Average</span>
+            <span id="modal-val-avg" class="text-xl font-extrabold text-[#142318] mt-1 block">--</span>
+          </div>
+          <div class="p-3 bg-white/80 border border-[#dedbcf] rounded-2xl">
+            <span class="text-[11px] font-bold text-[#526a57] uppercase block">Min</span>
+            <span id="modal-val-min" class="text-xl font-extrabold text-[#142318] mt-1 block">--</span>
+          </div>
+          <div class="p-3 bg-white/80 border border-[#dedbcf] rounded-2xl">
+            <span class="text-[11px] font-bold text-[#526a57] uppercase block">Max</span>
+            <span id="modal-val-max" class="text-xl font-extrabold text-[#142318] mt-1 block">--</span>
+          </div>
+        </div>
+
+        <!-- Waveform Container inside Modal -->
+        <div id="modal-chart-box" class="w-full"></div>
+
+        <!-- Hardware Specs -->
+        <div class="p-4 bg-white/80 border border-[#dedbcf] rounded-2xl text-xs text-[#36493c]">
+          <span class="font-bold text-[#142318] block mb-1">Hardware Interface Specification</span>
+          <div id="modal-spec-text" class="space-y-1">--</div>
+        </div>
+
+        <!-- Recent 10 table -->
+        <div>
+          <span class="font-bold text-xs text-[#142318] block mb-2">Recent Telemetry Frames</span>
+          <div class="border border-[#dedbcf] rounded-2xl overflow-hidden">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead class="bg-[#f0f2eb] text-[#526a57] font-bold">
+                <tr>
+                  <th class="p-2">Timestamp</th>
+                  <th class="p-2">Value</th>
+                  <th class="p-2">Buzzer</th>
+                  <th class="p-2">Status</th>
+                </tr>
+              </thead>
+              <tbody id="modal-recent-table" class="divide-y divide-[#dedbcf] text-[#142318]"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-3 border-t border-[#dedbcf] bg-[#f0f2eb] flex justify-end">
+        <button id="btn-modal-done" class="px-5 py-2 rounded-full bg-[#273d2e] hover:bg-[#1a2d1f] text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer">
+          Close Diagnostics
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic Modules -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+

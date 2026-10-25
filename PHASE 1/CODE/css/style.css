@@ -1,0 +1,110 @@
+/* ==========================================================================
+   SepsisGuard Clinical Sanctuary & IoT Telemetry Design System
+   Natural Green / Warm Sage / Cream Palette
+   ========================================================================== */
+
+:root {
+  --color-primary: #b3cdbb;
+  --color-surface-dark: #152017;
+  --color-sidebar: #17241a;
+  --color-sage-card-start: rgba(67, 88, 72, 0.95);
+  --color-sage-card-end: rgba(54, 73, 59, 0.98);
+  --color-cream-card-start: #fbfbf7;
+  --color-cream-card-end: #f4f3eb;
+  --color-cream-text: #18281d;
+  --color-coral-accent: #e56b43;
+  --color-alert-red: #c93b2b;
+  --color-alert-amber: #d97706;
+}
+
+/* Custom organic scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(23, 36, 26, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(122, 160, 131, 0.4);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(122, 160, 131, 0.7);
+}
+
+/* Tabular numbers for live telemetry metrics */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+/* Textures & Gradients matching Reference Design */
+.woodgrain-pattern {
+  background-color: #17241a;
+  background-image: radial-gradient(circle at 10% 20%, rgba(55, 78, 59, 0.4) 0%, transparent 40%),
+                    radial-gradient(circle at 90% 80%, rgba(35, 52, 38, 0.5) 0%, transparent 50%),
+                    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Cpath d='M0 45 C 80 15, 120 75, 200 45 C 280 15, 320 75, 400 45 M0 95 C 80 65, 120 125, 200 95 C 280 65, 320 125, 400 95 M0 145 C 80 115, 120 175, 200 145 C 280 115, 320 175, 400 145 M0 195 C 80 165, 120 225, 200 195 C 280 165, 320 225, 400 195 M0 245 C 80 215, 120 275, 200 245 C 280 215, 320 275, 400 245 M0 295 C 80 265, 120 325, 200 295 C 280 265, 320 325, 400 295 M0 345 C 80 315, 120 375, 200 345 C 280 315, 320 375, 400 345 M0 395 C 80 365, 120 425, 200 395 C 280 365, 320 425, 400 395' fill='none' stroke='rgba(38,55,41,0.35)' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.sage-card-gradient {
+  background: linear-gradient(145deg, rgba(67, 88, 72, 0.95) 0%, rgba(54, 73, 59, 0.98) 100%);
+}
+
+.cream-card-gradient {
+  background: linear-gradient(180deg, #fbfbf7 0%, #f4f3eb 100%);
+}
+
+.cream-card-subtle {
+  background: #ffffff;
+}
+
+/* Subtle Kinetic Pulse for Active Alert */
+@keyframes alert-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(229, 107, 67, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(229, 107, 67, 0.15);
+  }
+}
+
+.alert-pulse-border {
+  animation: alert-glow 2s ease-in-out infinite;
+}
+
+/* Modal Backdrop with organic blur */
+.modal-backdrop {
+  background-color: rgba(14, 23, 16, 0.75);
+  backdrop-filter: blur(8px);
+}
+
+/* Print Styles for Reports */
+@media print {
+  aside, header, #alert-banner, .no-print, button, nav {
+    display: none !important;
+  }
+  body, main {
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .pl-20, .md\:pl-24, .lg\:pl-72 {
+    padding-left: 0 !important;
+  }
+  .cream-card-gradient, .sage-card-gradient {
+    background: #ffffff !important;
+    border: 1px solid #ccc !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .report-table {
+    border: 1px solid #ddd !important;
+    width: 100% !important;
+    color: #000000 !important;
+  }
+}
