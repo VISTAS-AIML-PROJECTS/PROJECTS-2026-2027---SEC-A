@@ -1,0 +1,802 @@
+{
+  "input_directory": "D:\\Mine\\data\\integration_test",
+  "input_datasets": {
+    "real_telco_churn": "D:\\Mine\\data\\integration_test\\real_telco_churn.csv"
+  },
+  "joinable_datasets": [
+    "real_telco_churn"
+  ],
+  "skipped_datasets": [],
+  "source_row_counts": {
+    "real_telco_churn": 4225
+  },
+  "schemas": {
+    "real_telco_churn": {
+      "path": "D:\\Mine\\data\\integration_test\\real_telco_churn.csv",
+      "rows": 4225,
+      "columns": 52,
+      "column_names": [
+        "Age",
+        "Avg Monthly GB Download",
+        "Avg Monthly Long Distance Charges",
+        "Churn Category",
+        "Churn Reason",
+        "Churn Score",
+        "City",
+        "CLTV",
+        "Contract",
+        "Country",
+        "Customer ID",
+        "Customer Status",
+        "Dependents",
+        "Device Protection Plan",
+        "Gender",
+        "Internet Service",
+        "Internet Type",
+        "Lat Long",
+        "Latitude",
+        "Longitude",
+        "Married",
+        "Monthly Charge",
+        "Multiple Lines",
+        "Number of Dependents",
+        "Number of Referrals",
+        "Offer",
+        "Online Backup",
+        "Online Security",
+        "Paperless Billing",
+        "Partner",
+        "Payment Method",
+        "Phone Service",
+        "Population",
+        "Premium Tech Support",
+        "Quarter",
+        "Referred a Friend",
+        "Satisfaction Score",
+        "Senior Citizen",
+        "State",
+        "Streaming Movies",
+        "Streaming Music",
+        "Streaming TV",
+        "Tenure in Months",
+        "Total Charges",
+        "Total Extra Data Charges",
+        "Total Long Distance Charges",
+        "Total Refunds",
+        "Total Revenue",
+        "Under 30",
+        "Unlimited Data",
+        "Zip Code",
+        "Churn"
+      ],
+      "columns_detail": {
+        "Age": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 62,
+          "unique_ratio": 0.014674556213017751
+        },
+        "Avg Monthly GB Download": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 50,
+          "unique_ratio": 0.011834319526627219
+        },
+        "Avg Monthly Long Distance Charges": {
+          "dtype": "float64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2666,
+          "unique_ratio": 0.6310059171597633
+        },
+        "Churn Category": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 3104,
+          "missing_percentage": 73.46745562130178,
+          "unique_count": 5,
+          "unique_ratio": 0.001183431952662722
+        },
+        "Churn Reason": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 3104,
+          "missing_percentage": 73.46745562130178,
+          "unique_count": 20,
+          "unique_ratio": 0.004733727810650888
+        },
+        "Churn Score": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 81,
+          "unique_ratio": 0.019171597633136094
+        },
+        "City": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1085,
+          "unique_ratio": 0.25680473372781065
+        },
+        "CLTV": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2671,
+          "unique_ratio": 0.6321893491124261
+        },
+        "Contract": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 3,
+          "unique_ratio": 0.0007100591715976331
+        },
+        "Country": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1,
+          "unique_ratio": 0.00023668639053254438
+        },
+        "Customer ID": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 4225,
+          "unique_ratio": 1.0
+        },
+        "Customer Status": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 3,
+          "unique_ratio": 0.0007100591715976331
+        },
+        "Dependents": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Device Protection Plan": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Gender": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Internet Service": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Internet Type": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 886,
+          "missing_percentage": 20.97041420118343,
+          "unique_count": 3,
+          "unique_ratio": 0.0007100591715976331
+        },
+        "Lat Long": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1627,
+          "unique_ratio": 0.3850887573964497
+        },
+        "Latitude": {
+          "dtype": "float64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1594,
+          "unique_ratio": 0.3772781065088757
+        },
+        "Longitude": {
+          "dtype": "float64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1593,
+          "unique_ratio": 0.3770414201183432
+        },
+        "Married": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Monthly Charge": {
+          "dtype": "float64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1387,
+          "unique_ratio": 0.32828402366863907
+        },
+        "Multiple Lines": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Number of Dependents": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 8,
+          "unique_ratio": 0.001893491124260355
+        },
+        "Number of Referrals": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 12,
+          "unique_ratio": 0.0028402366863905324
+        },
+        "Offer": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 2324,
+          "missing_percentage": 55.00591715976332,
+          "unique_count": 5,
+          "unique_ratio": 0.001183431952662722
+        },
+        "Online Backup": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Online Security": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Paperless Billing": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Partner": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Payment Method": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 3,
+          "unique_ratio": 0.0007100591715976331
+        },
+        "Phone Service": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Population": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1539,
+          "unique_ratio": 0.3642603550295858
+        },
+        "Premium Tech Support": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Quarter": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1,
+          "unique_ratio": 0.00023668639053254438
+        },
+        "Referred a Friend": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Satisfaction Score": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 5,
+          "unique_ratio": 0.001183431952662722
+        },
+        "Senior Citizen": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "State": {
+          "dtype": "object",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1,
+          "unique_ratio": 0.00023668639053254438
+        },
+        "Streaming Movies": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Streaming Music": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Streaming TV": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Tenure in Months": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 72,
+          "unique_ratio": 0.017041420118343194
+        },
+        "Total Charges": {
+          "dtype": "float64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 4038,
+          "unique_ratio": 0.9557396449704142
+        },
+        "Total Extra Data Charges": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 16,
+          "unique_ratio": 0.00378698224852071
+        },
+        "Total Long Distance Charges": {
+          "dtype": "float64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 3705,
+          "unique_ratio": 0.8769230769230769
+        },
+        "Total Refunds": {
+          "dtype": "float64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 312,
+          "unique_ratio": 0.07384615384615385
+        },
+        "Total Revenue": {
+          "dtype": "float64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 4198,
+          "unique_ratio": 0.9936094674556213
+        },
+        "Under 30": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Unlimited Data": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        },
+        "Zip Code": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 1594,
+          "unique_ratio": 0.3772781065088757
+        },
+        "Churn": {
+          "dtype": "int64",
+          "row_count": 4225,
+          "missing_count": 0,
+          "missing_percentage": 0.0,
+          "unique_count": 2,
+          "unique_ratio": 0.00047337278106508875
+        }
+      }
+    }
+  },
+  "entity_key_detection": {
+    "key": "Customer ID",
+    "confidence": 0.64,
+    "column_by_dataset": {
+      "real_telco_churn": "Customer ID"
+    },
+    "candidates": [
+      {
+        "dataset": "real_telco_churn",
+        "column": "Customer ID",
+        "score": 0.64
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Total Revenue",
+        "score": 0.5474437869822485
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Total Charges",
+        "score": 0.5322958579881657
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Total Long Distance Charges",
+        "score": 0.5007692307692307
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "CLTV",
+        "score": 0.4028757396449705
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Avg Monthly Long Distance Charges",
+        "score": 0.4024023668639053
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Lat Long",
+        "score": 0.3040355029585799
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Latitude",
+        "score": 0.3009112426035503
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Zip Code",
+        "score": 0.3009112426035503
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Longitude",
+        "score": 0.30081656804733725
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Population",
+        "score": 0.2957041420118343
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Monthly Charge",
+        "score": 0.28131360946745565
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "City",
+        "score": 0.2527218934911243
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Customer Status",
+        "score": 0.24028402366863905
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Total Refunds",
+        "score": 0.17953846153846154
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Churn Score",
+        "score": 0.15766863905325443
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Tenure in Months",
+        "score": 0.15681656804733726
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Age",
+        "score": 0.1558698224852071
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Avg Monthly GB Download",
+        "score": 0.1547337278106509
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Total Extra Data Charges",
+        "score": 0.15151479289940828
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Number of Referrals",
+        "score": 0.15113609467455622
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Number of Dependents",
+        "score": 0.15075739644970412
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Satisfaction Score",
+        "score": 0.1504733727810651
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Contract",
+        "score": 0.15028402366863905
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Payment Method",
+        "score": 0.15028402366863905
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Dependents",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Device Protection Plan",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Gender",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Internet Service",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Married",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Multiple Lines",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Online Backup",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Online Security",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Paperless Billing",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Partner",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Phone Service",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Premium Tech Support",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Referred a Friend",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Senior Citizen",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Streaming Movies",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Streaming Music",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Streaming TV",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Under 30",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Unlimited Data",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Churn",
+        "score": 0.15018934911242604
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Country",
+        "score": 0.150094674556213
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Quarter",
+        "score": 0.150094674556213
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "State",
+        "score": 0.150094674556213
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Internet Type",
+        "score": 0.11890376773685916
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Offer",
+        "score": 0.06854320211411619
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Churn Reason",
+        "score": 0.046935301849046436
+      },
+      {
+        "dataset": "real_telco_churn",
+        "column": "Churn Category",
+        "score": 0.0415829378882971
+      }
+    ]
+  },
+  "canonical_entity_key": "Customer ID",
+  "relationships": {
+    "per_dataset": {
+      "real_telco_churn": {
+        "key": "Customer ID",
+        "cardinality": "one-per-entity",
+        "aggregation_plan": null
+      }
+    },
+    "pairwise": []
+  },
+  "aggregation_operations": [],
+  "merge": {
+    "join_key": "Customer ID",
+    "merge_order": [
+      "real_telco_churn"
+    ],
+    "operations": [],
+    "duplicate_columns_removed": [],
+    "conflicts": [],
+    "final_row_count": 4225,
+    "final_column_count": 52,
+    "row_multiplication_detected": false
+  },
+  "coverage": {
+    "real_telco_churn": {
+      "source_entities": 4225,
+      "final_entities": 4225,
+      "matched_to_final": 4225,
+      "coverage_percentage": 100.0
+    }
+  },
+  "warnings": [],
+  "requested_target_column": "Churn",
+  "target_column": "Churn",
+  "target_found_in": [
+    "real_telco_churn"
+  ],
+  "final_row_count": 4225,
+  "final_column_count": 52,
+  "output_csv": "data\\processed\\integrated_dataset.csv"
+}
