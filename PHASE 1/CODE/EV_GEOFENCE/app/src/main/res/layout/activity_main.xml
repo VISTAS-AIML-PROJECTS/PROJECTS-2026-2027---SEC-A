@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0F172A">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🚗 EV GEOFENCE GPS"
+            android:textColor="#F8FAFC"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:paddingBottom="6dp"/>
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="GPS STOPPED"
+            android:textColor="#F8FAFC"
+            android:textSize="21sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:background="#334155"
+            android:padding="16dp"
+            android:layout_marginBottom="14dp"/>
+
+        <TextView
+            android:id="@+id/espText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ESP32: NOT TESTED"
+            android:textColor="#CBD5E1"
+            android:textSize="16sp"
+            android:gravity="center"
+            android:padding="8dp"/>
+
+        <TextView
+            android:id="@+id/latText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Latitude: --"
+            android:textColor="#F8FAFC"
+            android:textSize="18sp"
+            android:padding="10dp"/>
+
+        <TextView
+            android:id="@+id/lonText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Longitude: --"
+            android:textColor="#F8FAFC"
+            android:textSize="18sp"
+            android:padding="10dp"/>
+
+        <TextView
+            android:id="@+id/accuracyText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Accuracy: --"
+            android:textColor="#F8FAFC"
+            android:textSize="18sp"
+            android:padding="10dp"/>
+
+        <TextView
+            android:id="@+id/distanceText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Distance from Home: --"
+            android:textColor="#F8FAFC"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:padding="10dp"/>
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="▶ START LIVE GPS"
+            android:textSize="17sp"/>
+
+        <Button
+            android:id="@+id/homeButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🏠 SET CURRENT LOCATION AS HOME"
+            android:textSize="16sp"
+            android:enabled="false"/>
+
+        <Button
+            android:id="@+id/stopButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⏹ STOP GPS"
+            android:textSize="17sp"
+            android:enabled="false"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Geofence radius: 5 metres\nESP32: http://192.168.4.1/gps\n\nKeep the phone connected to EV_GEOFENCE Wi-Fi. Internet is not required."
+            android:textColor="#94A3B8"
+            android:textSize="14sp"
+            android:paddingTop="18dp"/>
+    </LinearLayout>
+</ScrollView>
