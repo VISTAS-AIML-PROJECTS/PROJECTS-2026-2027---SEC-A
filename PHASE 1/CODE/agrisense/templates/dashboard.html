@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AGriSense - Farm Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <header>
+        <div class="logo-area">
+            <span class="logo-icon">🌱</span>
+            <div>
+                <div class="logo-title">AGriSense</div>
+                <div class="logo-subtitle">Smart Agriculture Intelligence</div>
+            </div>
+        </div>
+        <nav aria-label="Main navigation">
+            <a href="/dashboard" class="nav-link active">Dashboard</a>
+            <a href="/soil-monitoring" class="nav-link">Soil Monitor</a>
+            <a href="/crop-analysis" class="nav-link">Crop Analysis</a>
+            <a href="/disease-detection" class="nav-link">Disease Detection</a>
+            <a href="/advisor" class="nav-link">AI Advisor</a>
+            <a href="/history" class="nav-link">History</a>
+            <a href="/logout" class="nav-link logout-link">Logout</a>
+        </nav>
+    </header>
+
+    <main class="farm-dashboard">
+        <section class="farm-welcome">
+            <div>
+                <p class="eyebrow">YOUR FARM OVERVIEW</p>
+                <h1>Good day, {{ current_user.name if current_user else 'Farmer' }}</h1>
+                <p>See the latest field readings, review your weekly soil trends, and open an analysis.</p>
+            </div>
+            <a class="farm-primary-action" href="/crop-analysis">＋ Start an analysis</a>
+        </section>
+
+        <section class="dashboard-section">
+            <div class="dashboard-section-heading">
+                <div>
+                    <p class="eyebrow">FIELD CONDITIONS</p>
+                    <h2>Latest sensor readings</h2>
+                </div>
+                <span class="dashboard-sync-status" id="dashboard-sync-status">Loading sensor status…</span>
+            </div>
+            <div class="dashboard-sensor-grid">
+                {% set values = [
+                    ('soil_moisture', 'Soil moisture', '%', '◌'),
+                    ('ph', 'Soil pH', '', '◉'),
+                    ('temperature', 'Air temperature', '°C', '☼'),
+                    ('humidity', 'Air humidity', '%', '≈'),
+                    ('nitrogen', 'Nitrogen', '', 'N'),
+                    ('phosphorus', 'Phosphorus', '', 'P'),
+                    ('potassium', 'Potassium', '', 'K')
+                ] %}
+                {% for key, label, unit, icon in values %}
+                {% set value = latest_sensors.get(key) if latest_sensors else none %}
+                {% if value in [none, '', 'Not Available', 'None', 'null'] %}
+                    {% set value = none %}
+                {% endif %}
+                <article class="dashboard-sensor-card">
+                    <div class="dashboard-sensor-top">
+                        <span class="dashboard-sensor-icon">{{ icon }}</span>
+                        <span>{{ label }}</span>
+                    </div>
+                    <strong data-sensor-value="{{ key }}">
+                        {% if value is none %}—{% else %}{{ value }}{% if unit %} {{ unit }}{% endif %}{% endif %}
+                    </strong>
+                    {% if key in ['nitrogen', 'phosphorus', 'potassium'] %}
+                    <small>Reported sensor units</small>
+                    {% else %}
+                    <small>Latest received value</small>
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            <div class="dashboard-reading-foot">
+                <span id="dashboard-reading-time">
+                    {% if latest_sensors and latest_sensors.timestamp %}
+                    Last packet: {{ latest_sensors.timestamp }}
+                    {% else %}
+                    No sensor packet received yet
+                    {% endif %}
+                </span>
+                <a href="/soil-monitoring">Open weekly soil monitoring →</a>
+            </div>
+        </section>
+
+        <section class="dashboard-section">
+            <div class="dashboard-section-heading">
+                <div>
+                    <p class="eyebrow">TOOLS FOR YOUR FIELD</p>
+                    <h2>Farm intelligence</h2>
+                </div>
+            </div>
+            <div class="farm-tools-grid">
+                <a href="/soil-monitoring" class="farm-tool-card tool-monitor">
+                    <span class="farm-tool-icon">⌁</span>
+                    <span class="farm-tool-kicker">PHASE 2 · SENSOR MONITORING</span>
+                    <strong>Weekly soil monitor</strong>
+                    <p>Track soil and weather readings through the week, spot gaps, and get practical field checks.</p>
+                    <span class="farm-tool-link">View weekly trends →</span>
+                </a>
+                <a href="/crop-analysis" class="farm-tool-card">
+                    <span class="farm-tool-icon">🌾</span>
+                    <span class="farm-tool-kicker">SOIL · CROP OPTIONS</span>
+                    <strong>Crop analysis</strong>
+                    <p>Compare the model's crop options and browse locally grown crops from Tamil Nadu.</p>
+                    <span class="farm-tool-link">Open crop analysis →</span>
+                </a>
+                <a href="/disease-detection" class="farm-tool-card">
+                    <span class="farm-tool-icon">⌕</span>
+                    <span class="farm-tool-kicker">LEAF · IMAGE CHECK</span>
+                    <strong>Disease detection</strong>
+                    <p>Upload a clear leaf image to review possible disease patterns and next steps.</p>
+                    <span class="farm-tool-link">Check a leaf →</span>
+                </a>
+                <a href="/advisor" class="farm-tool-card">
+                    <span class="farm-tool-icon">✦</span>
+                    <span class="farm-tool-kicker">FIELD · GUIDANCE</span>
+                    <strong>AI field advisor</strong>
+                    <p>Bring crop, sensor and disease findings together for a readable field summary.</p>
+                    <span class="farm-tool-link">Open advisor →</span>
+                </a>
+            </div>
+        </section>
+
+        <section class="panel-card dashboard-history">
+            <div class="panel-title dashboard-history-title">
+                <span>Recent analyses</span>
+                <a href="/history">View all history →</a>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr><th>Date</th><th>Crop option</th><th>Leaf result</th><th>Field risk</th></tr>
+                    </thead>
+                    <tbody>
+                    {% if recent_analyses %}
+                        {% for item in recent_analyses %}
+                        <tr>
+                            <td>{{ item.timestamp }}</td>
+                            <td class="dashboard-crop-name">{{ item.recommended_crop|title }}</td>
+                            <td>{{ item.disease }} · {{ item.health_status }}</td>
+                            <td>
+                                <span class="status-badge {% if item.risk_level|lower in ['high', 'critical'] %}critical{% else %}normal{% endif %}">
+                                    {{ item.risk_level or 'Review' }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr><td colspan="4" class="dashboard-empty-row">Your completed crop and leaf analyses will show here.</td></tr>
+                    {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
