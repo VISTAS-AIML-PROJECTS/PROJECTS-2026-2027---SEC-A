@@ -1,0 +1,248 @@
+
+services:
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pipeline
+    container_name: ghostit-pipeline
+    cap_add:
+      - SYS_PTRACE
+    env_file:
+      - /etc/ghostit/.env
+    ports:
+      - "8000:8000"
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ghostit-data:/data
+      - /home/ubuntu/ghostlayer/agent-releases:/home/ubuntu/ghostlayer/agent-releases
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  redis:
+
+    image: redis:7-alpine
+
+    container_name: ghostit-redis
+
+    ports:
+
+      - "6379:6379"
+
+    volumes:
+
+      - ghostit-redis-data:/data
+
+    command: redis-server --appendonly yes
+
+    healthcheck:
+
+      test: ["CMD", "redis-cli", "ping"]
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 5
+
+    restart: unless-stopped
+
+  canary:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.canary
+    container_name: ghostit-canary
+    env_file:
+      - /etc/ghostit/.env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ghostit-data:/data
+    depends_on:
+      pipeline:
+        condition: service_healthy
+    restart: unless-stopped
+
+    healthcheck:
+
+
+
+
+      test: ["CMD-SHELL", "grep -qla canary/server.py /proc/[0-9]*/cmdline 2>/dev/null || exit 1"]
+
+
+
+
+      interval: 15s
+
+      timeout: 5s
+
+      retries: 5
+
+      start_period: 10s
+
+
+  detection:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.detection
+    container_name: ghostit-detection
+    env_file:
+      - /etc/ghostit/.env
+    volumes:
+      - ghostit-data:/data
+    depends_on:
+      pipeline:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+    healthcheck:
+
+
+
+      test: ["CMD-SHELL", "grep -qla detection/engine.py /proc/[0-9]*/cmdline 2>/dev/null || exit 1"]
+
+
+
+      interval: 15s
+
+      timeout: 5s
+
+      retries: 5
+
+      start_period: 10s
+
+  causal-engine:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.causal
+    container_name: ghostit-causal
+    env_file:
+      - /etc/ghostit/.env
+    volumes:
+      - ghostit-data:/data
+    depends_on:
+      pipeline:
+        condition: service_healthy
+    restart: unless-stopped
+
+    healthcheck:
+
+
+
+      test: ["CMD-SHELL", "grep -qla causal-engine/ensemble.py /proc/[0-9]*/cmdline 2>/dev/null || exit 1"]
+
+
+
+      interval: 15s
+
+      timeout: 5s
+
+      retries: 5
+
+      start_period: 10s
+
+
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard-api
+    container_name: ghostit-dashboard-api
+    env_file:
+      - /etc/ghostit/.env
+    ports:
+      - "8001:8001"
+    volumes:
+      - ghostit-data:/data
+      - /home/ubuntu/ghostlayer/data:/root/ghostlayer/data
+    environment:
+      - PIPELINE_API=http://pipeline:8000
+    depends_on:
+      pipeline:
+        condition: service_healthy
+    restart: unless-stopped
+
+    healthcheck:
+
+      test: ["CMD", "python3", "-c",
+
+             "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 5
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    container_name: ghostit-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://13.205.24.55:8000
+      - REACT_APP_DASHBOARD_API_URL=http://13.205.24.55:8001
+    depends_on:
+
+      pipeline:
+
+        condition: service_healthy
+
+      dashboard-api:
+
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ghostit-prometheus
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ghostit-prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      pipeline:
+        condition: service_healthy
+    restart: unless-stopped
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ghostit-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=ghostit-admin-2026
+    volumes:
+      - ghostit-grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+volumes:
+  ghostit-prometheus-data:
+    driver: local
+  ghostit-grafana-data:
+    driver: local
+  ghostit-data:
+    driver: local
+
+
+  ghostit-redis-data:
+
+    driver: local
+
+networks:
+  default:
+    name: ghostit-network
