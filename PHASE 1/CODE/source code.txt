@@ -1,0 +1,219 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ESP32Servo.h>
+
+// ================= OLED =================
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define OLED_ADDRESS 0x3C
+
+#define OLED_SDA 21
+#define OLED_SCL 22
+
+// ================= PINS =================
+#define MQ2_PIN 34
+#define SERVO_PIN 13
+#define RELAY_PIN 26
+
+#define GREEN_LED 25
+#define YELLOW_LED 32
+#define RED_LED 33
+
+// ================= CONFIGURATION =================
+
+// Relay module is active-LOW
+#define RELAY_ACTIVE_LOW true
+
+// Provisional raw ADC thresholds
+const int WARNING_THRESHOLD = 1700;
+const int DANGER_THRESHOLD = 3000;
+
+// ================= OBJECTS =================
+Adafruit_SSD1306 display(
+  SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET
+);
+
+Servo gasServo;
+
+// ================= VARIABLES =================
+int gasRaw = 0;
+int servoAngle = 0;
+bool fanOn = false;
+bool sensorFound = false;
+
+const char* status = "SAFE";
+
+// ================= FAN CONTROL =================
+void setFan(bool on) {
+  fanOn = on;
+
+  if (RELAY_ACTIVE_LOW) {
+    digitalWrite(RELAY_PIN, on ? LOW : HIGH);
+  } else {
+    digitalWrite(RELAY_PIN, on ? HIGH : LOW);
+  }
+}
+
+// ================= LED CONTROL =================
+void setLEDs(bool green, bool yellow, bool red) {
+  digitalWrite(GREEN_LED, green ? HIGH : LOW);
+  digitalWrite(YELLOW_LED, yellow ? HIGH : LOW);
+  digitalWrite(RED_LED, red ? HIGH : LOW);
+}
+
+// ================= SETUP =================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(YELLOW_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+
+  // Safe initial outputs
+  setFan(false);
+  setLEDs(true, false, false);
+
+  analogReadResolution(12);
+  analogSetPinAttenuation(MQ2_PIN, ADC_11db);
+
+  // Initialize OLED
+  Wire.begin(OLED_SDA, OLED_SCL);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    Serial.println("OLED initialization failed!");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  // Initialize servo
+  gasServo.setPeriodHertz(50);
+  gasServo.attach(SERVO_PIN, 500, 2400);
+  gasServo.write(0);
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setTextSize(2);
+  display.setCursor(5, 0);
+  display.println("GASGUARD");
+
+  display.drawLine(0, 19, 127, 19, SSD1306_WHITE);
+
+  display.setTextSize(1);
+  display.setCursor(10, 32);
+  display.println("Initializing...");
+  display.setCursor(10, 45);
+  display.println("MQ-2 Sensor");
+
+  display.display();
+
+  Serial.println("GASGUARD STARTED");
+  Serial.println("MQ2 | HEALTH | STATUS | FAN | SERVO");
+}
+
+// ================= MAIN LOOP =================
+void loop() {
+  // Average 10 readings
+  long total = 0;
+
+  for (int i = 0; i < 10; i++) {
+    total += analogRead(MQ2_PIN);
+    delay(5);
+  }
+
+  gasRaw = total / 10;
+
+  // Sensor health indication
+  sensorFound = (gasRaw > 0);
+
+  // Determine gas state and outputs
+  if (gasRaw >= DANGER_THRESHOLD) {
+    status = "DANGER";
+    servoAngle = 180;
+
+    setLEDs(false, false, true);
+    setFan(true);
+  }
+  else if (gasRaw >= WARNING_THRESHOLD) {
+    status = "WARNING";
+    servoAngle = 90;
+
+    setLEDs(false, true, false);
+    setFan(true);
+  }
+  else {
+    status = "SAFE";
+    servoAngle = 0;
+
+    setLEDs(true, false, false);
+    setFan(false);
+  }
+
+  // Command servo using its external 5V supply
+  gasServo.write(servoAngle);
+
+  // ================= OLED DISPLAY =================
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  // Large title
+  display.setTextSize(2);
+  display.setCursor(5, 0);
+  display.println("GASGUARD");
+
+  display.drawLine(0, 19, 127, 19, SSD1306_WHITE);
+
+  display.setTextSize(1);
+
+  display.setCursor(0, 22);
+  display.print("MQ2 RAW: ");
+  display.println(gasRaw);
+
+  display.setCursor(0, 32);
+  display.print("HEALTH: ");
+  display.println(sensorFound ? "OK" : "0");
+
+  if (!sensorFound) {
+    display.setCursor(0, 42);
+    display.println("SENSOR NOT FOUND");
+
+    display.setCursor(0, 53);
+    display.print("STATUS: ");
+    display.println(status);
+  }
+  else {
+    display.setCursor(0, 42);
+    display.print("STATUS: ");
+    display.println(status);
+
+    display.setCursor(0, 53);
+    display.print("SV:");
+    display.print(servoAngle);
+    display.print(" FAN:");
+    display.println(fanOn ? "ON" : "OFF");
+  }
+
+  display.display();
+
+  // ================= SERIAL MONITOR =================
+  Serial.print("RAW: ");
+  Serial.print(gasRaw);
+
+  Serial.print(" | SENSOR HEALTH: ");
+  Serial.print(sensorFound ? "OK" : "SENSOR NOT FOUND");
+
+  Serial.print(" | STATUS: ");
+  Serial.print(status);
+
+  Serial.print(" | FAN: ");
+  Serial.print(fanOn ? "ON" : "OFF");
+
+  Serial.print(" | SERVO: ");
+  Serial.println(servoAngle);
+
+  delay(500);
+}
