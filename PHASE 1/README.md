@@ -4,14 +4,7 @@
 An on-screen keyboard you operate by looking at it. No special hardware — just
 an ordinary webcam and a browser.
 
-![The EYEQ keyboard running live](report/paper/figs/fig_ui.png)
 
-*Above: the keyboard in use. The panel top-right shows the tracker following the
-eyes; the crosshair is resting on **L**, filling its dwell timer; the chips are
-word suggestions. The face is blurred for privacy — the tracking markers on top
-of it are not.*
-
----
 
 ## What it does
 
