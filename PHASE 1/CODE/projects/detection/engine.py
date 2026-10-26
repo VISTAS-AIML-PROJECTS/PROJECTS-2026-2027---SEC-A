@@ -1,0 +1,1353 @@
+#!/usr/bin/env python3
+"""
+Ghost IT — Detection Engine v0
+Reads events via REST API. Runs 3 detection layers.
+"""
+import os
+import sys
+import json
+import time
+import socket
+import logging
+import argparse
+import urllib.request
+import urllib.parse
+import redis
+
+# Simulation Engine: caches each entity's most recent prediction, so
+# a later detection on the same entity can check whether reality
+# genuinely converged toward it.
+_PREDICTION_CACHE = {}
+from datetime import datetime, timezone
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from detection.rules      import check_event, check_sequence, Detection
+from detection.mitre      import get_mitre_tag, KillChainStage
+def _feed_cortex(pid: int, pillar: str, reason: str):
+    """
+    Report a finding to the Cortex via HTTP -- see
+    pipeline/server_v2.py's POST /cortex/contribute for full
+    rationale (DuckDB single-writer concurrency means only the
+    pipeline process can open the Cortex DB directly; every other
+    service, including this one, contributes over HTTP instead).
+    Failures here are logged but never block detection itself; the
+    Cortex is an enhancement layer, not a dependency the core
+    pipeline should ever be blocked by.
+    """
+    if not pid:
+        return
+    try:
+        import urllib.parse
+        url = (f"http://ghostit-pipeline:8000/cortex/contribute?"
+               f"pid={pid}&pillar={urllib.parse.quote(pillar)}&reason={urllib.parse.quote(reason[:200])}")
+        req = urllib.request.Request(url, method="POST")
+        urllib.request.urlopen(req, timeout=3)
+    except Exception as ex:
+        log.debug(f"Cortex feed error: {ex}")
+def _feed_cortex_host(host: str, pillar: str, reason: str):
+    """
+    Host-level Cortex contribution -- for signals like C19's kernel
+    integrity violations that aren't tied to one PID, but genuinely
+    compromise trust in the entire machine. Uses 'host:{hostname}' as
+    the Cortex entity ID instead of 'pid:{pid}'.
+    """
+    if not host or host == "unknown":
+        return
+    try:
+        import urllib.parse
+        url = (f"http://ghostit-pipeline:8000/cortex/contribute?"
+               f"pid=host_{urllib.parse.quote(host)}&pillar={urllib.parse.quote(pillar)}"
+               f"&reason={urllib.parse.quote(reason[:200])}")
+        req = urllib.request.Request(url, method="POST")
+        urllib.request.urlopen(req, timeout=3)
+    except Exception as ex:
+        log.debug(f"Cortex host-feed error: {ex}")
+def _observe_threshold(pillar: str, score: float):
+    """
+    Report a raw score observation to Adaptive Threshold Calibration,
+    REGARDLESS of whether any detection fired -- calibration needs
+    the full distribution of normal activity, not just the already-
+    flagged tail, to learn this deployment's genuine baseline.
+    """
+    try:
+        import urllib.parse
+        url = f"http://ghostit-pipeline:8000/adaptive-thresholds/observe?pillar={urllib.parse.quote(pillar)}&score={score}"
+        req = urllib.request.Request(url, method="POST")
+        urllib.request.urlopen(req, timeout=3)
+    except Exception as ex:
+        log.debug(f"Adaptive threshold observe error: {ex}")
+def _feed_temporal_memory(host: str, comm: str, resource: str, pillar: str, reason: str):
+    """
+    Report a sighting to Temporal Attack-Graph Memory via HTTP (same
+    single-writer-via-pipeline pattern as Cortex, for the same
+    concurrency reason). Records whether this specific pattern has
+    been seen before, possibly days ago -- recognizing a returning
+    actor across time, not just within one session.
+    """
+    try:
+        import urllib.parse
+        params = urllib.parse.urlencode({
+            "host": host, "comm": comm, "resource": resource[:200],
+            "pillar": pillar, "reason": reason[:200],
+        })
+        url = f"http://ghostit-pipeline:8000/temporal-memory/sighting?{params}"
+        req = urllib.request.Request(url, method="POST")
+        urllib.request.urlopen(req, timeout=3)
+    except Exception as ex:
+        log.debug(f"Temporal memory feed error: {ex}")
+def _check_and_observe_dna(comm: str, parent_comm: str, event_type: str, path: str):
+    """
+    Behavioral DNA: observe this event to build the comm's trusted
+    profile, then check if THIS instance's lineage is consistent --
+    if masquerading is suspected, feed it into the Cortex as a real,
+    high-confidence signal (identity mismatch is genuinely strong
+    evidence, independent of anything else).
+    """
+    path = path or ""
+    try:
+        import urllib.parse
+        obs_params = urllib.parse.urlencode({
+            "comm": comm, "parent_comm": parent_comm,
+            "event_type": event_type, "path": path[:200],
+        })
+        obs_url = f"http://ghostit-pipeline:8000/behavioral-dna/observe?{obs_params}"
+        urllib.request.urlopen(urllib.request.Request(obs_url, method="POST"), timeout=3)
+
+        check_params = urllib.parse.urlencode({
+            "comm": comm, "parent_comm": parent_comm,
+            "event_type": event_type, "path": path[:200],
+        })
+        check_url = f"http://ghostit-pipeline:8000/behavioral-dna/check?{check_params}"
+        with urllib.request.urlopen(check_url, timeout=3) as r:
+            result = json.loads(r.read())
+        if result.get("masquerade_suspected"):
+            log.warning(
+                f"[BehavioralDNA] MASQUERADE SUSPECTED: '{comm}' claims to be "
+                f"trusted but parent='{parent_comm}' inconsistent with typical "
+                f"parents {result.get('typical_parents')}"
+            )
+    except Exception as ex:
+        log.debug(f"Behavioral DNA check error: {ex}")
+from detection.chain_tracker import ChainTracker
+from detection.lineage    import LineageTracer
+from detection.aggregator import analyze_window
+from detection.behavioral.engine import BehavioralAIEngine
+from detection.ransomware.ema_detector import RansomwareEMADetector
+from detection.ransomware.file_entropy_monitor import FileEntropyMonitor
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), '..'))
+from detectors.lolbin_detector import LOLBinDetector
+from detectors.exfiltration_detector import ExfiltrationDetector
+from detectors.identity_detector import IdentityDetector
+from detectors.mitre_gap_detectors import (
+    check_t1027_obfuscated_execution, check_t1070_indicator_removal,
+    check_t1059_command_interpreter_abuse, check_t1055_process_injection,
+    check_t1547_persistence, check_t1003_credential_dumping,
+    check_t1490_inhibit_recovery, check_t1110_brute_force, T1110_WINDOW_SEC,
+    check_t1105_ingress_tool_transfer,
+)
+from detectors.memory_exploit_detector import MemoryExploitDetector
+from detectors.doh_analyzer import DoHBehavioralAnalyzer, NetworkFlow, DOH_WHITELIST
+from detectors.dns_analyzer import DNSAnalyzer
+from detectors.ja4_fingerprinter import JA4PlusFingerprinter, TLSFlow
+
+# Level set to INFO by default; pass --log-level DEBUG at startup to see
+# verbose internal diagnostics (e.g. C15 window feature values) without
+# needing to edit source code and restart every time.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [detection] %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+log = logging.getLogger(__name__)
+
+
+
+_GHOST_INTERNAL_SECRET = os.environ.get("GHOST_INTERNAL_SECRET", "")
+_GHOST_TCP_API_KEY = os.environ.get("GHOST_API_KEY", "e5fc9ef08eb9a71509e7420ea42cf8577f10da26b43d8a71")
+
+# Global default opener: attaches X-Internal-Auth to every request made
+
+# via urllib.request.urlopen() anywhere in this file, including the many
+
+# scattered inline Request(...) calls above and below -- one fix instead
+
+# of eleven individually risky edits across call sites with different
+
+# shapes (bare url strings, POST Requests, GET Requests).
+
+_opener = urllib.request.build_opener()
+
+_opener.addheaders = [("X-Internal-Auth", _GHOST_INTERNAL_SECRET)]
+
+urllib.request.install_opener(_opener)
+
+
+# Global default opener: attaches X-Internal-Auth to every request made
+
+# via urllib.request.urlopen() anywhere in this file, including the many
+
+# scattered inline Request(...) calls above and below -- one fix instead
+
+# of eleven individually risky edits across call sites with different
+
+# shapes (bare url strings, POST Requests, GET Requests).
+
+_opener = urllib.request.build_opener()
+
+_opener.addheaders = [("X-Internal-Auth", _GHOST_INTERNAL_SECRET)]
+
+urllib.request.install_opener(_opener)
+
+
+
+
+
+def api_get(url: str) -> dict:
+
+    try:
+
+        req = urllib.request.Request(url, headers={"X-Internal-Auth": _GHOST_INTERNAL_SECRET})
+
+        with urllib.request.urlopen(req, timeout=15) as r:
+
+            return json.loads(r.read())
+
+    except Exception as ex:
+
+        log.error(f"API error {url}: {ex}")
+
+        return {}
+
+
+
+# LOLBin severity -> confidence: was hardcoded to 85 regardless of
+
+# whether the matched pattern was CRITICAL (WMIC remote exec) or
+
+# MEDIUM (vim editor breakout) -- real evidence strength should
+
+# differ. Not a full evidence-model conversion (that's a bigger,
+
+# separately-scoped task) -- this specifically fixes the fake
+
+# constant with a real value derived from what actually matched.
+
+_LOLBIN_SEVERITY_CONFIDENCE = {"CRITICAL": 95, "HIGH": 75, "MEDIUM": 50}
+
+
+
+def lolbin_confidence(severity: str) -> int:
+
+    return _LOLBIN_SEVERITY_CONFIDENCE.get(severity, 60)
+
+
+
+
+
+def send_to_pipeline(detections: list, host: str, port: int):
+    if not detections:
+        return
+    events = []
+    for d in detections:
+        tag = get_mitre_tag(d.rule_id)
+        # Predictive Next-Step Inference: given this detection's
+        # confirmed tactic, query what's statistically likely to
+        # happen next per real MITRE ATT&CK kill-chain progression,
+        # and log it as an actionable anticipatory signal -- turns
+        # this from purely reactive detection into genuine prediction.
+        if tag:
+            try:
+                import urllib.parse as _urlp
+                _url = f"http://ghostit-pipeline:8000/predict/{_urlp.quote(tag.tactic)}"
+                with urllib.request.urlopen(_url, timeout=3) as _r:
+                    _pred = json.loads(_r.read())
+                if _pred.get("predicted_next"):
+                    next_tactics = [p["tactic"] for p in _pred["predicted_next"]]
+                    log.warning(
+                        f"[PREDICT] {d.rule_id} confirmed at tactic={tag.tactic} "
+                        f"-- likely next: {next_tactics} "
+                        f"(kill chain position {_pred.get('kill_chain_position')}/"
+                        f"{_pred.get('kill_chain_total_stages')})"
+                    )
+                    _entity = d.evidence[0].get("pid") if hasattr(d, "evidence") and d.evidence else None
+                    if _entity:
+                        _prior = _PREDICTION_CACHE.get(f"{_entity}_prior")
+                        if _prior:
+                            try:
+                                _sim_params = urllib.parse.urlencode({"predicted": ",".join(_prior), "observed": tag.tactic})
+                                _sim_url = f"http://ghostit-pipeline:8000/simulation/check-trajectory?{_sim_params}"
+                                _sim_req = urllib.request.Request(_sim_url, method="POST")
+                                with urllib.request.urlopen(_sim_req, timeout=3) as _sr:
+                                    _sim_result = json.loads(_sr.read())
+                                if _sim_result.get("trajectory_match"):
+                                    log.warning(f"[Simulation] TRAJECTORY MATCH for pid {_entity}: {_sim_result['conclusion']}")
+                            except Exception as _ex_sim:
+                                log.debug(f"Simulation engine error: {_ex_sim}")
+                        _PREDICTION_CACHE[f"{_entity}_prior"] = next_tactics
+            except Exception as _ex:
+                log.debug(f"Predictive inference error: {_ex}")
+            try:
+                _entity_id = d.evidence[0].get("pid") if hasattr(d, "evidence") and d.evidence else 0
+                _incident_id = f"incident-pid-{_entity_id}"
+                _replay_params = urllib.parse.urlencode({
+                    "incident_id": _incident_id, "entity_id": f"pid:{_entity_id}",
+                    "event_type": tag.tactic.lower().replace(" ", "_") if tag else d.rule_id.lower(),
+                    "description": d.title, "pillar": d.rule_id,
+                })
+                _replay_url = f"http://ghostit-pipeline:8000/replay/record?{_replay_params}"
+                _replay_req = urllib.request.Request(_replay_url, method="POST")
+                urllib.request.urlopen(_replay_req, timeout=3)
+            except Exception as _ex_replay:
+                log.debug(f"Attack replay recording error: {_ex_replay}")
+        # V1.5: tag whether this rule has a real incident response
+        # playbook available -- dashboard uses this to show/hide the
+        # "View Playbook" action, fetching the actual content from
+        # GET /api/playbook/{rule_id} rather than duplicating the
+        # playbook text into every single alert event.
+        has_playbook = d.rule_id in ("C15_RANSOMWARE", "C14_LOLBIN",
+                                       "C19_LKRG_INTEGRITY", "canary_hit",
+                                       "R002", "R003", "R004")
+        reasons = [
+            d.rule_id,
+            d.title,
+            f"confidence:{d.confidence}",
+        ]
+        if has_playbook:
+            reasons.append("playbook:available")
+        reasons.append(f"detection_method:{getattr(d, 'detection_method', 'deterministic_rule')}")
+        if tag:
+            reasons += [
+                f"tactic:{tag.tactic}",
+                f"technique:{tag.technique_id}",
+                f"kill_chain:{tag.kill_chain.label()}",
+            ]
+        event = (d.evidence[0] if hasattr(d, "evidence") and d.evidence else {})
+        events.append({
+            "ts":      int(time.time_ns()),
+            "pid": event.get("pid", -1), "ppid": event.get("ppid", -1), "uid": event.get("uid", -1), "gid": event.get("gid", -1),
+            "source_ts": event.get("ts"),  # real MTTD: original event timestamp (ns), preserved through the alert
+            "comm":    f"detection:{d.rule_id}",
+            "type":    "detection",
+            "score":   100,
+            "alert":   True,
+            "reasons": reasons,
+            "file":    d.description,
+            "daddr":   None, "dport": None,
+        })
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2)
+        s.connect((host, port))
+        s.sendall((_GHOST_TCP_API_KEY + "\n").encode())
+        s.sendall((json.dumps(events) + "\n").encode())
+        s.close()
+        log.info(f"Forwarded {len(detections)} detections")
+    except OSError as ex:
+        log.error(f"Pipeline unavailable: {ex}")
+        for d in detections:
+            log.warning(f"[{d.severity.upper()}] {d.rule_id} — {d.title}")
+
+
+class DetectionEngine:
+    def __init__(self, api_base: str, poll_interval: int,
+                 window: int, pipeline_host: str, pipeline_port: int):
+        self.api         = api_base
+        self.poll        = poll_interval
+        self.window      = window
+        self.p_host      = pipeline_host
+        self.p_port      = pipeline_port
+        self.cycle_count = 0
+        self.window_offset = 0
+        self.last_offset = 0
+        self.seen_ids = self._seed_seen_ids()
+        self.start_time  = time.time()
+        self._ransomware = RansomwareEMADetector()
+        self._lolbin     = LOLBinDetector()
+        self._exfil      = ExfiltrationDetector()
+        self._identity   = IdentityDetector()
+        self._memory_exploit = MemoryExploitDetector()
+        self._doh = DoHBehavioralAnalyzer()
+        self._dns = DNSAnalyzer()
+        self._ja4 = JA4PlusFingerprinter()
+        self._t1110_failures = {}  # src_ip -> list of failure timestamps, rolling window
+        # PID -> comm cache for process-chain detection (wmic->powershell etc).
+        # Populated as events flow through; capped by size since PIDs get
+        # reused and we only need recent-enough mappings.
+        self._pid_comm_cache: dict[int, str] = {}
+        self._PID_CACHE_MAX = 5000
+        self._entropy_monitor = FileEntropyMonitor(pipeline_host=pipeline_host, pipeline_port=pipeline_port)
+        self._entropy_monitor.start()
+
+        # Week 2: Redis Streams as a low-latency trigger, not a replacement
+
+        # for _fetch_new's HTTP polling. If Redis is unreachable, self._redis
+
+        # stays None and run() falls back to the exact old sleep(poll)
+
+        # behavior -- this must never become a hard dependency.
+
+        redis_host = os.environ.get("GHOST_REDIS_HOST", "redis")
+
+        redis_port = int(os.environ.get("GHOST_REDIS_PORT", "6379"))
+
+        try:
+
+            self._redis = redis.Redis(host=redis_host, port=redis_port, decode_responses=True, socket_connect_timeout=2)
+
+            self._redis.ping()
+
+            for stream in ("ghost:events:critical", "ghost:events:standard"):
+
+                try:
+
+                    self._redis.xgroup_create(stream, "detection-engine", id="$", mkstream=True)
+
+                except redis.exceptions.ResponseError as e:
+
+                    if "BUSYGROUP" not in str(e):
+
+                        raise
+
+            log.info("Redis Streams trigger connected -- polling loop will wake on new events instead of blind sleep")
+
+        except Exception as ex:
+
+            self._redis = None
+
+            log.warning(f"Redis unavailable, falling back to plain poll interval: {ex}")
+
+        log.info("C15 FileEntropyMonitor started")
+        log.info(f"Engine ready — starting at offset {self.last_offset}")
+
+    def _seed_seen_ids(self) -> set:
+        """Get max event ID at startup — only detect events with higher IDs.
+        Retries until pipeline is ready and returns events."""
+        import time as _time
+        for attempt in range(10):
+            data2 = api_get(f"{self.api}/events?limit=1&offset=0&min_score=0")
+            events = data2.get("events", [])
+            if events:
+                self.max_id_at_start = events[0].get("id", 0)
+                break
+            log.info(f"Pipeline not ready yet (attempt {attempt+1}/10) — retrying in 3s")
+            _time.sleep(3)
+        else:
+            # Pipeline has no events yet — set to 0 but skip first 30s of detections
+            self.max_id_at_start = 0
+            self._skip_until = _time.time() + 30
+            log.warning("Pipeline empty at startup — skipping detections for 30s")
+        self.chain_tracker = ChainTracker()
+        log.info(f"Max event ID at startup: {self.max_id_at_start}")
+        # C2: Behavioral AI Engine
+        self._behavioral = BehavioralAIEngine(
+            pipeline_host="127.0.0.1",
+            pipeline_port=9000,
+        )
+        log.info("C2 BehavioralAIEngine wired in")
+        return set()
+
+    def _get_total(self) -> int:
+        data = api_get(f"{self.api}/stats")
+        return data.get("total", 0)
+
+    def _fetch_new(self) -> list[dict]:
+        """Fetch events newer than max_seen_id using /events/since cursor."""
+        import time as _time
+        # Skip if within startup suppression window
+        if hasattr(self, "_skip_until") and _time.time() < self._skip_until:
+            return []
+        # Use max_seen_id as cursor
+        if not hasattr(self, "_max_seen_id"):
+            self._max_seen_id = self.max_id_at_start
+        # Real, genuine fix for the true, final root cause found tonight:
+        # EVENT_SEQ on the server is an in-memory counter that resets to a
+        # new timestamp-based seed on every pipeline restart. A stale
+        # since_id from before a restart becomes permanently higher than
+        # any new, post-restart event ID, silently freezing this method
+        # forever. Detect this by comparing our cursor against the
+        # server's current actual max id, and reset if we're ahead of it.
+        try:
+            probe = api_get(f"{self.api}/events?limit=1&offset=0&min_score=0")
+            probe_events = probe.get("events", [])
+            if probe_events:
+                real_max = probe_events[0].get("id", 0)
+                if real_max < self._max_seen_id:
+                    log.warning(f"Pipeline restart detected (real_max={real_max} < cursor={self._max_seen_id}) -- resetting cursor")
+                    self._max_seen_id = 0
+        except Exception:
+            pass
+        data = api_get(f"{self.api}/events/since?since_id={self._max_seen_id}&limit=500")
+        events = data.get("events", [])
+        log.info(f"DEBUG_FETCH_NEW since_id={self._max_seen_id} got={len(events)} max_id_in_response={data.get('max_id')} raw_keys={list(data.keys())}")
+        if events:
+            self._max_seen_id = data.get("max_id", self._max_seen_id)
+        # Supplemental fetch: shell opens of /tmp and /dev/shm — high-value
+        for prefix in ("/tmp/", "/dev/shm/"):
+            try:
+                tmp_data = api_get(
+                    f"{self.api}/events/file-opens?path_prefix={prefix}"
+                    f"&since_id={self.max_id_at_start}&limit=50"
+                )
+                for e in tmp_data.get("events", []):
+                    if e.get("id", 0) > self._max_seen_id - 10000:
+                        if not any(x.get("id") == e.get("id") for x in events):
+                            events.append(e)
+            except Exception:
+                pass
+
+        # Supplemental fetch: auth_failure events (buried by eBPF flood)
+        try:
+            auth_data = api_get(f"{self.api}/events?limit=50&type=auth_failure")
+            for e in auth_data.get("events", []):
+                if e.get("id", 0) > self.max_id_at_start:
+                    if not any(x.get("id") == e.get("id") for x in events):
+                        events.append(e)
+        except Exception:
+            pass
+        return events
+    def _fetch_window(self) -> list[dict]:
+        """Fetch recent events — only last 200 to avoid historical noise."""
+        offset = max(0, self.last_offset - 200)
+        data   = api_get(f"{self.api}/events?limit=2000&offset={offset}&min_score=0")
+        return data.get("events", [])
+
+    def run_once(self) -> int:
+        self.cycle_count += 1
+        detections: list[Detection] = []
+
+        # Layer 1 + sequence — new events only
+        new_events = self._fetch_new()
+        if new_events:
+            log.debug(f"Analyzing {len(new_events)} new events")
+            for e in new_events:
+                # Update PID->comm cache for process-chain resolution.
+                # Every event teaches the cache its own PID's current name,
+                # so future children can resolve this event's PID as a parent.
+                e_pid = e.get("pid", 0)
+                e_comm = e.get("comm", "")
+                if e_pid and e_comm:
+                    if len(self._pid_comm_cache) >= self._PID_CACHE_MAX:
+                        # Evict oldest ~10% when full (simple FIFO via dict order)
+                        for k in list(self._pid_comm_cache.keys())[:self._PID_CACHE_MAX // 10]:
+                            del self._pid_comm_cache[k]
+                    self._pid_comm_cache[e_pid] = e_comm
+
+                d = check_event(e)
+                if d:
+                    detections.append(d)
+
+                # C14 process-chain: resolve this event's parent comm from
+                # the cache, then check if parent->child matches a known
+                # suspicious chain (wmic->powershell, word->powershell, etc).
+                e_ppid = e.get("ppid", 0)
+                parent_comm = self._pid_comm_cache.get(e_ppid, "")
+                if parent_comm and e_comm:
+                    try:
+                        chain_alert = self._lolbin.check_process_chain(parent_comm, e_comm)
+                    except Exception as _ex_lb:
+                        log.error(f"LOLBin chain detector crashed: {_ex_lb}")
+                        chain_alert = None
+                    if chain_alert:
+                        detections.append(Detection(
+                            rule_id     = "C14_LOLBIN_CHAIN",
+                            severity    = chain_alert.severity,
+                            title       = f"Suspicious process chain: {chain_alert.technique}",
+                            description = f"{parent_comm} -> {e_comm} matches known attack pattern",
+                            confidence  = lolbin_confidence(chain_alert.severity),
+                            evidence    = [e],
+                        ))
+                        _feed_cortex(e_pid, "C14_lolbin", f"chain:{parent_comm}->{e_comm}")
+                # C2: Behavioral AI
+                # Feed every raw event score to Adaptive Threshold
+                # Calibration, regardless of whether any pillar fires --
+                # calibration needs the full baseline distribution, not
+                # just the already-flagged tail.
+                if e.get("score") is not None:
+                    _observe_threshold("C2_behavioral", e.get("score"))
+                # Behavioral DNA: observe this event to build/reinforce
+                # the comm's trusted profile, AND check if this specific
+                # instance's lineage is consistent with that profile --
+                # masquerading detection independent of process name.
+                if e_comm and parent_comm:
+                    _check_and_observe_dna(e_comm, parent_comm, e.get("type", ""), e.get("file", ""))
+                b = self._behavioral.process_event(e)
+                if b:
+                    detections.append(Detection(
+                        rule_id     = "B001",
+                        severity    = b.severity,
+                        title       = f"Behavioral anomaly: {b.rationale}",
+                        description = f"Behavioral AI detected anomaly — score={b.score:.2f}",
+                        confidence  = int(b.score * 100),
+                        detection_method = "ml_isolation_forest",
+                        evidence    = [e],
+                    ))
+                    _feed_cortex(e_pid, "C2_behavioral", b.rationale)
+                # Cortex: even when C2 does NOT cross its own threshold,
+                # still feed a light-weight signal if the raw event score
+                # is meaningfully elevated -- this is what lets genuinely
+                # sub-threshold behavioral drift still contribute to
+                # cross-pillar fusion instead of being discarded entirely.
+                elif e.get("score", 0) >= 40:
+                    _feed_cortex(e_pid, "C2_behavioral", f"elevated_event_score:{e.get('score')}")
+                # C15: Ransomware EMA
+                r = self._ransomware.process_event(e)
+                if r:
+                    r_confidence = min(100, int(r.z_score * 20))
+                    detections.append(Detection(
+                        rule_id     = f"C15_{r.trigger}",
+                        severity    = r.severity.lower() if r.severity != "CRITICAL" else "critical",
+                        title       = f"Ransomware EMA: {r.trigger}",
+                        description = f"Ransomware behaviour detected — z_score={r.z_score:.1f}",
+                        confidence  = r_confidence,
+                        detection_method = "statistical_ema",
+                        evidence    = [e],
+                    ))
+                    _feed_cortex(e_pid, "C15_ransomware", f"{r.trigger}:z={r.z_score:.1f}")
+                    _feed_temporal_memory(e.get("host","unknown"), e.get("comm","unknown"), e.get("file","") or "unknown", "C15_ransomware", r.trigger)
+                    _observe_threshold("C15_ransomware", r_confidence)
+                else:
+                    _observe_threshold("C15_ransomware", 0)
+                # C14: LOLBin
+
+                # C10: Identity Intelligence
+
+                try:
+                    pth = self._identity.check_pass_the_hash(e)
+                except Exception as _ex_id:
+                    log.error(f"Identity PtH detector crashed: {_ex_id}")
+                    pth = None
+
+                if pth:
+
+                    _id_confidence = 90 if pth.severity == "critical" else 75
+
+                    detections.append(Detection(
+
+                        rule_id     = "C10_IDENTITY",
+
+                        severity    = pth.severity,
+
+                        title       = f"Identity: {pth.technique}",
+
+                        description = pth.detail,
+
+                        confidence  = _id_confidence,
+
+                        evidence    = [e],
+
+                    ))
+
+                    _feed_cortex(e_pid, "C10_identity", pth.technique)
+
+                    _observe_threshold("C10_identity", _id_confidence)
+
+                else:
+
+                    _observe_threshold("C10_identity", 0)
+
+                try:
+                    travel = self._identity.check_impossible_travel(e)
+                except Exception as _ex_tv:
+                    log.error(f"Identity impossible-travel detector crashed: {_ex_tv}")
+                    travel = None
+
+                if travel:
+
+                    _travel_confidence = 90 if travel.severity == "critical" else 75
+
+                    detections.append(Detection(
+
+                        rule_id     = "C10_IDENTITY_TRAVEL",
+
+                        severity    = travel.severity,
+
+                        title       = f"Identity: {travel.technique}",
+
+                        description = travel.detail,
+
+                        confidence  = _travel_confidence,
+
+                        evidence    = [e],
+
+                    ))
+
+                    _feed_cortex(e_pid, "C10_identity", travel.technique)
+
+                    _observe_threshold("C10_identity_travel", _travel_confidence)
+
+                else:
+
+                    _observe_threshold("C10_identity_travel", 0)
+
+                # MITRE gap coverage — 7 previously-unwired technique
+
+                # detectors (T1027/T1070/T1059/T1055/T1547/T1003/T1490).
+
+                # Two others (T1105 ingress-tool-transfer, T1110 brute
+
+                # force) need fields/state not currently captured on a
+
+                # single event (url field, cross-event failure counting)
+
+                # -- genuinely deferred, not silently skipped.
+
+
+                _mitre_confidence = {"critical": 95, "high": 80, "medium": 60}
+                _cmdline = f"{e_comm} {e.get('args', '') or ''}"
+                _mg_check_fns = [
+                    lambda: check_t1027_obfuscated_execution(e_comm, e.get("args", "") or ""),
+                    lambda: check_t1070_indicator_removal(_cmdline),
+                    lambda: check_t1059_command_interpreter_abuse(_cmdline),
+                    lambda: check_t1055_process_injection(_cmdline),
+                    lambda: check_t1547_persistence(e.get("file", "") or ""),
+                    lambda: check_t1003_credential_dumping(_cmdline),
+                    lambda: check_t1490_inhibit_recovery(_cmdline),
+                ]
+                _mg_checks = []
+                for _mg_fn in _mg_check_fns:
+                    try:
+                        _mg_checks.append(_mg_fn())
+                    except Exception as _mg_ex:
+                        log.error(f"MITRE gap detector crashed, skipping just that technique: {_mg_ex}")
+                        _mg_checks.append(None)
+                for _mg in _mg_checks:
+                    if _mg:
+                        _mg_conf = _mitre_confidence.get(_mg.severity, 60)
+
+                        detections.append(Detection(
+
+                            rule_id     = f"MITRE_{_mg.technique_id}",
+
+                            severity    = _mg.severity,
+
+                            title       = f"{_mg.technique_id}: {_mg.technique_name}",
+
+                            description = _mg.reason,
+
+                            confidence  = _mg_conf,
+
+                            evidence    = [e],
+
+                        ))
+
+                        _feed_cortex(e_pid, f"mitre_{_mg.technique_id}", _mg.reason[:100])
+
+                        _observe_threshold(f"mitre_{_mg.technique_id}", _mg_conf)
+
+                # C9-lite: Memory/Exploit unified scorer
+
+                try:
+                    mx = self._memory_exploit.check_event(e)
+                except Exception as _ex_mx:
+                    log.error(f"MemoryExploit detector crashed: {_ex_mx}")
+                    mx = None
+
+                if mx:
+
+                    _mx_confidence = 60 if mx.is_jit else 85
+
+                    detections.append(Detection(
+
+                        rule_id     = "C9_MEMORY_EXPLOIT",
+
+                        severity    = mx.severity,
+
+                        title       = f"Suspicious executable-memory activity: {mx.comm}",
+
+                        description = f"pid {mx.pid} ({mx.comm}) triggered {mx.count} exec-memory events in window -- {'JIT process, elevated threshold' if mx.is_jit else 'non-JIT process, real concern'}",
+
+                        confidence  = _mx_confidence,
+
+                        evidence    = [e],
+
+                    ))
+
+                    _feed_cortex(e_pid, "C9_memory_exploit", f"exec_mem_events:{mx.count}")
+
+                    _observe_threshold("C9_memory_exploit", _mx_confidence)
+
+                else:
+
+                    _observe_threshold("C9_memory_exploit", 0)
+
+                # C14: DoH C2 detection -- only checking known DoH
+
+                # resolvers (Check 2: connection-frequency abuse). Checks
+
+                # 1 and 3 need a bytes_out/payload-size field that isn't
+
+                # captured on any event yet -- calling analyze() on a
+
+                # non-whitelisted dst_ip would spuriously fire Check 1
+
+                # (its bytes_out<1024 condition defaults to always-true
+
+                # with no real payload data), so deliberately gated to
+
+                # only the resolvers where Check 2 is the sole reachable,
+
+                # honest path.
+
+                _daddr = e.get("daddr") or ""
+
+                if _daddr in DOH_WHITELIST:
+
+                    _flow = NetworkFlow(
+
+                        src_ip=e.get("source_ip", "") or "",
+
+                        dst_ip=_daddr,
+
+                        dst_port=int(e.get("dport", 0) or 0),
+
+                    )
+
+                    try:
+                        doh = self._doh.analyze(_flow)
+                    except Exception as _ex_doh:
+                        log.error(f"DoH detector crashed: {_ex_doh}")
+                        doh = None
+
+                    if doh:
+
+                        _doh_confidence = int(doh.score * 100)
+
+                        detections.append(Detection(
+
+                            rule_id     = "C14_DOH",
+
+                            severity    = doh.severity.lower(),
+
+                            title       = f"DoH C2 indicator: {doh.dst_ip}",
+
+                            description = doh.reason,
+
+                            confidence  = _doh_confidence,
+
+                            evidence    = [e],
+
+                        ))
+
+                        _feed_cortex(e_pid, "C14_doh", doh.reason[:100])
+
+                        _observe_threshold("C14_doh", _doh_confidence)
+
+                    else:
+
+                        _observe_threshold("C14_doh", 0)
+
+                # C14: DNS DGA/tunneling analysis -- only on real
+
+                # dns_query events (added this morning: sendmsg-based
+
+                # capture, since sendto never fires for connected UDP
+
+                # sockets that most real resolvers use).
+
+                if e.get("type") == "dns_query" and e.get("file"):
+
+                    try:
+                        dns_alert = self._dns.analyze_query(e.get("file", ""))
+                    except Exception as _ex_dns:
+                        log.error(f"DNS detector crashed: {_ex_dns}")
+                        dns_alert = None
+
+                    if dns_alert:
+
+                        _dns_confidence = int(dns_alert.score * 100)
+
+                        detections.append(Detection(
+
+                            rule_id     = "C14_DNS",
+
+                            severity    = dns_alert.severity.lower(),
+
+                            title       = f"DNS threat: {dns_alert.domain}",
+
+                            description = dns_alert.reason,
+
+                            confidence  = _dns_confidence,
+
+                            evidence    = [e],
+
+                        ))
+
+                        _feed_cortex(e_pid, "C14_dns", dns_alert.reason[:100])
+
+                        _observe_threshold("C14_dns", _dns_confidence)
+
+                    else:
+
+                        _observe_threshold("C14_dns", 0)
+
+                # MITRE T1110 Brute Force -- real data source: auth_watcher.py
+
+                # (new this session) tails /var/log/auth.log for real failed
+
+                # SSH logins and forwards them as type=auth_failure events.
+
+                if e.get("type") == "auth_failure":
+
+                    _src_ip = e.get("daddr") or "unknown"
+
+                    _now_t = time.time()
+
+                    _hist = self._t1110_failures.setdefault(_src_ip, [])
+
+                    _hist.append(_now_t)
+
+                    _hist[:] = [t for t in _hist if _now_t - t <= T1110_WINDOW_SEC]
+
+                    _bf = check_t1110_brute_force(len(_hist), T1110_WINDOW_SEC)
+
+                    if _bf:
+
+                        _bf_conf = _mitre_confidence.get(_bf.severity, 60)
+
+                        detections.append(Detection(
+
+                            rule_id     = f"MITRE_{_bf.technique_id}",
+
+                            severity    = _bf.severity,
+
+                            title       = f"{_bf.technique_id}: {_bf.technique_name}",
+
+                            description = f"{_bf.reason} (source: {_src_ip})",
+
+                            confidence  = _bf_conf,
+
+                            evidence    = [e],
+
+                        ))
+
+                        _feed_cortex(e_pid, f"mitre_{_bf.technique_id}", _bf.reason[:100])
+
+                        _observe_threshold(f"mitre_{_bf.technique_id}", _bf_conf)
+
+                        _hist.clear()  # reset window after firing, avoid re-alerting every subsequent event
+
+                    else:
+
+                        _observe_threshold("mitre_T1110", 0)
+
+
+                # MITRE T1105 Ingress Tool Transfer -- doesn't need
+
+                # new capture: check_t1105_ingress_tool_transfer()
+
+                # takes a url param but never actually uses it in its
+
+                # own logic (confirmed by reading the function) --
+
+                # only needs comm (curl/wget) and dest_path, both
+
+                # derivable from existing process_exec args. url
+
+                # left empty since it's genuinely unused downstream.
+
+                if e.get("type") in ("exec", "process_exec") and e.get("comm") in ("curl", "wget"):
+
+                    try:
+
+                        _t1105_args = e.get("args", "") or ""
+
+                        _t1105_tokens = _t1105_args.split()
+
+                        _t1105_dest = ""
+
+                        for _i, _tok in enumerate(_t1105_tokens):
+
+                            if _tok in ("-o", "-O", "--output") and _i + 1 < len(_t1105_tokens):
+
+                                _t1105_dest = _t1105_tokens[_i + 1]
+
+                                break
+
+                        _t1105 = check_t1105_ingress_tool_transfer(e.get("comm", ""), "", _t1105_dest)
+
+                    except Exception as _ex_t1105:
+
+                        log.error(f"T1105 detector crashed: {_ex_t1105}")
+
+                        _t1105 = None
+
+                    if _t1105:
+
+                        _t1105_conf = _mitre_confidence.get(_t1105.severity, 60)
+
+                        detections.append(Detection(
+
+                            rule_id     = f"MITRE_{_t1105.technique_id}",
+
+                            severity    = _t1105.severity,
+
+                            title       = f"{_t1105.technique_id}: {_t1105.technique_name}",
+
+                            description = _t1105.reason,
+
+                            confidence  = _t1105_conf,
+
+                            evidence    = [e],
+
+                        ))
+
+                        _feed_cortex(e_pid, f"mitre_{_t1105.technique_id}", _t1105.reason[:100])
+
+                        _observe_threshold(f"mitre_{_t1105.technique_id}", _t1105_conf)
+
+                    else:
+
+                        _observe_threshold("mitre_T1105", 0)
+
+                # C14: JA4+ TLS fingerprinting -- real data source:
+
+                # eBPF captures the raw TLS ClientHello (both sendmsg
+
+                # and sendto paths, different TLS libraries use
+
+                # different syscalls -- confirmed via real strace).
+
+                # Only the known-C2-hash check is wired; the
+
+                # DoH-resolver check was found to be a guaranteed
+
+                # false-positive flood on all HTTPS traffic and
+
+                # disabled at the detector level (see
+
+                # ja4_fingerprinter.py's own comment).
+
+                if e.get("type") == "tls_client_hello" and e.get("file"):
+
+                    try:
+
+                        _hello_bytes = bytes.fromhex(e.get("file", ""))
+
+                        _flow = TLSFlow(
+
+                            src_ip=e.get("source_ip", "") or "",
+
+                            dst_ip=e.get("daddr", "") or "",
+
+                            dst_port=int(e.get("dport", 0) or 0),
+
+                            client_hello=_hello_bytes,
+
+                        )
+
+                        ja4_alert = self._ja4.analyze(_flow)
+
+                    except Exception as _ex_ja4:
+
+                        log.error(f"JA4 detector crashed: {_ex_ja4}")
+
+                        ja4_alert = None
+
+                    if ja4_alert:
+
+                        _ja4_conf = 95 if ja4_alert.severity == "CRITICAL" else 75
+
+                        detections.append(Detection(
+
+                            rule_id     = "C14_JA4",
+
+                            severity    = ja4_alert.severity.lower(),
+
+                            title       = f"JA4+ C2 fingerprint: {ja4_alert.ja4_hash}",
+
+                            description = ja4_alert.reason,
+
+                            confidence  = _ja4_conf,
+
+                            evidence    = [e],
+
+                        ))
+
+                        _feed_cortex(e_pid, "C14_ja4", ja4_alert.reason[:100])
+
+                        _observe_threshold("C14_ja4", _ja4_conf)
+
+                    else:
+
+                        _observe_threshold("C14_ja4", 0)
+
+
+                try:
+                    l = self._lolbin.check_event(e)
+                except Exception as _ex_lb2:
+                    log.error(f"LOLBin event detector crashed: {_ex_lb2}")
+                    l = None
+                if l:
+                    detections.append(Detection(
+                        rule_id     = "C14_LOLBIN",
+                        severity    = l.severity,
+                        title       = f"LOLBin: {l.technique}",
+                        description = f"Living-off-the-land binary abuse detected",
+                        confidence  = lolbin_confidence(l.severity),
+                        evidence    = [e],
+                    ))
+                    _feed_cortex(e_pid, "C14_lolbin", l.technique)
+                    _observe_threshold("C14_lolbin", lolbin_confidence(l.severity))
+                else:
+                    _observe_threshold("C14_lolbin", 0)
+                # C20: Insider Threat / Bulk Exfiltration
+                xf = self._exfil.check_event(e)
+                if xf:
+                    detections.append(Detection(
+                        rule_id     = "C20_EXFILTRATION",
+                        severity    = xf.severity,
+                        title       = f"Bulk file access: {xf.distinct_files} distinct files in {xf.window_sec}s",
+                        description = f"Process {xf.comm} (pid {xf.pid}) accessed {xf.distinct_files} distinct files rapidly -- possible data staging/exfiltration",
+                        confidence  = 90 if xf.severity == "critical" else 75,
+                        evidence    = [e],
+                    ))
+                    _feed_cortex(e_pid, "C20_exfiltration", f"bulk_access:{xf.distinct_files}_files")
+                    _observe_threshold("C20_exfiltration", 90 if xf.severity == "critical" else 75)
+                else:
+                    _observe_threshold("C20_exfiltration", 0)
+                if d:
+                    _observe_threshold(f"rule_{d.rule_id}", d.confidence)
+                # C19: LKRG kernel integrity violations
+                if e.get("type") == "kernel_integrity" and e.get("score", 0) >= 80:
+                    detections.append(Detection(
+                        rule_id     = "C19_LKRG_INTEGRITY",
+                        severity    = "critical",
+                        title       = "Kernel integrity violation detected",
+                        description = f"LKRG flagged a real kernel/process integrity concern: {e.get('file', '')[:120]}",
+                        confidence  = 90,
+                        evidence    = [e],
+                    ))
+                    # C19 feeds Cortex as a HOST-level entity, not PID
+                    # -- kernel integrity violations aren't tied to one
+                    # process, they compromise the whole machine's
+                    # trustworthiness. Every process running on a host
+                    # with a kernel integrity violation should
+                    # genuinely be treated with elevated suspicion.
+                    _feed_cortex_host(e.get("host", "unknown"), "C19_kernel",
+                                       e.get("file", "")[:150])
+
+            by_pid: dict[int, list] = {}
+            for e in new_events:
+                by_pid.setdefault(e.get("pid", 0), []).append(e)
+            for evts in by_pid.values():
+                if len(evts) >= 2:
+                    detections.extend(
+                        check_sequence(sorted(evts, key=lambda x: x.get("ts") or 0))
+                    )
+
+        # Layer 2 + 3 — window, once per 6 cycles (60s)
+        if False:  # window analysis disabled until clean baseline
+            window_events = self._fetch_window()
+            if window_events:
+                tracer = LineageTracer()
+                for e in window_events:
+                    tracer.add_event(e)
+                detections.extend(tracer.analyze())
+                detections.extend(analyze_window(window_events))
+
+        # Deduplicate
+        seen, unique = set(), []
+        for d in detections:
+            key = f"{d.rule_id}:{d.title}"
+            if key not in seen:
+                seen.add(key)
+                unique.append(d)
+
+        if unique:
+            for d in unique:
+                tag = get_mitre_tag(d.rule_id)
+                mitre_str = f" | {tag.tactic} {tag.technique_id} | {tag.kill_chain.label()}" if tag else ""
+                log.warning(
+                    f"[{d.severity.upper()}] {d.rule_id} — {d.title} ({d.confidence}%){mitre_str}"
+                )
+                self.chain_tracker.process(d.rule_id, d.title, d.confidence)
+
+            active = self.chain_tracker.active_chains()
+            if active:
+                log.info(f"Active chains: {len(active)} | Highest severity: {self.chain_tracker.highest_severity()}")
+                import pathlib, json as _json
+                state = {"chains": active, "highest_severity": self.chain_tracker.highest_severity()}
+                pathlib.Path(os.environ.get("CHAIN_STATE_PATH", os.path.expanduser("~/ghostlayer/data/chain_state.json"))).write_text(_json.dumps(state))
+
+            send_to_pipeline(unique, self.p_host, self.p_port)
+            # C17 Alert Correlation — wire detections into incident DB
+            try:
+                if not hasattr(self, '_correlator'):
+                    import sys as _sys
+                    # Same class of bug as C4's hardcoded ~/ghostlayer path
+                    # (fixed earlier) -- resolves relative to this file's
+                    # own location instead of assuming a fixed home
+                    # directory that doesn't exist in Docker (/app, not
+                    # /root/ghostlayer).
+                    _alert_engine_dir = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "alert-engine")
+                    _sys.path.insert(0, _alert_engine_dir)
+                    from correlator import AlertCorrelator
+                    self._correlator = AlertCorrelator()
+                from incidents import RawAlert
+                from weights import AlertSource, Severity
+                _source_map = {
+                    # C15 ransomware → Impact T1486
+                    "C15_RENAME_STORM": AlertSource.C15_RANSOMWARE,
+                    "C15_ENTROPY_SPIKE": AlertSource.C15_RANSOMWARE,
+                    "C15_EXT_CHANGE": AlertSource.C15_RANSOMWARE,
+                    "C15_WRITE_RATE": AlertSource.C15_RANSOMWARE,
+                    # C2/network detections → C14_TLS (Command and Control)
+                    "R003": AlertSource.C14_TLS,
+                    "R004": AlertSource.C14_TLS,
+                    "R007": AlertSource.C14_TLS,
+                    # LOLBin/execution detections → C9_EBPF (Execution)
+                    "R014": AlertSource.C9_EBPF,
+                    "R006": AlertSource.C9_EBPF,
+                    "R008": AlertSource.C9_EBPF,
+                    "R010": AlertSource.C9_EBPF,
+                    "R012": AlertSource.C9_EBPF,
+                    # Auth failures → BEHAVIORAL_AI (Credential Access)
+                    "R013": AlertSource.BEHAVIORAL_AI,
+                    # Canary/deception → DECEPTION (Collection)
+                    "R001": AlertSource.DECEPTION,
+                    "R002": AlertSource.DECEPTION,
+                }
+                _sev_map = {
+                    "critical": Severity.CRITICAL,
+                    "high":     Severity.HIGH,
+                    "medium":   Severity.MEDIUM,
+                }
+                # Deduplication: same rule+comm within 60s = skip
+                import time as _time
+                if not hasattr(self, '_c17_dedup'):
+                    self._c17_dedup = {}
+                now_ts = _time.time()
+                # Clean old entries
+                self._c17_dedup = {k: v for k, v in self._c17_dedup.items() if now_ts - v < 60}
+
+                for d in unique:
+                    ev = d.evidence[0] if hasattr(d, "evidence") and d.evidence else {}
+                    dedup_key = f"{d.rule_id}:{ev.get('comm', '')}"
+                    if dedup_key in self._c17_dedup:
+                        log.debug(f"C17 dedup: skipping {dedup_key} (within 60s)")
+                        continue
+                    self._c17_dedup[dedup_key] = now_ts
+                    raw = RawAlert.create(
+                        source=_source_map.get(d.rule_id,
+                        AlertSource.C15_RANSOMWARE if d.rule_id.startswith("C15_") else
+                        AlertSource.BEHAVIORAL_AI),
+                        severity=_sev_map.get(d.severity.lower(), Severity.MEDIUM),
+                        pid=ev.get("pid", 0),
+                        host="localhost",
+                        comm=ev.get("comm", d.rule_id),
+                        reason=d.title,
+                        event_type="detection",
+                        raw_json=json.dumps(ev),
+                    )
+                    iid = self._correlator.ingest(raw)
+                    if iid:
+                        log.info(f"C17 incident updated: {iid[:8]}")
+            except Exception as _c17_ex:
+                log.debug(f"C17 wire error: {_c17_ex}")
+
+        return len(unique)
+
+
+    def _wait_for_trigger(self):
+
+        """Blocks until either Redis signals a new event, or self.poll
+
+        seconds elapse -- whichever comes first. Falls back to a plain
+
+        sleep if Redis isn't connected. Never raises; any Redis error
+
+        here just means we fall through to the timer, same as before."""
+
+        if self._redis is None:
+
+            time.sleep(self.poll)
+
+            return
+
+        try:
+
+            self._redis.xreadgroup(
+
+                "detection-engine", "engine-main",
+
+                {"ghost:events:critical": ">", "ghost:events:standard": ">"},
+
+                count=1, block=self.poll * 1000
+
+            )
+
+            # We don't process the Redis payload directly here -- _fetch_new's
+
+            # HTTP-based fetch (with its cursor-reset detection and
+
+            # supplemental fetches) remains the single source of truth for
+
+            # what gets processed. Redis here is purely a wakeup signal.
+
+        except Exception as ex:
+
+            log.warning(f"Redis wait failed, falling back to sleep: {ex}")
+
+            time.sleep(self.poll)
+
+    def run(self):
+
+        log.info(f"Running — poll={self.poll}s window={self.window}s")
+
+        total = 0
+
+        while True:
+
+            try:
+
+                n = self.run_once()
+
+                total += n
+
+                if n:
+
+                    log.info(f"Cycle done — {n} detections (total: {total})")
+
+                self._wait_for_trigger()
+
+            except KeyboardInterrupt:
+
+                log.info(f"Stopped — total: {total}")
+
+                break
+
+            except Exception as ex:
+
+                import traceback; log.error(f"Engine error: {ex}\n{traceback.format_exc()}")
+
+                time.sleep(self.poll)
+
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--log-level",      default="INFO", choices=["DEBUG","INFO","WARNING","ERROR"])
+    ap.add_argument("--api",           default="http://127.0.0.1:8000")
+    ap.add_argument("--poll-interval", default=10,  type=int)
+    ap.add_argument("--window",        default=120, type=int)
+    ap.add_argument("--pipeline-host", default="127.0.0.1")
+    ap.add_argument("--pipeline-port", default=9000, type=int)
+    args = ap.parse_args()
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
+
+    DetectionEngine(
+        api_base      = args.api,
+        poll_interval = args.poll_interval,
+        window        = args.window,
+        pipeline_host = args.pipeline_host,
+        pipeline_port = args.pipeline_port,
+    ).run()
+
+
+if __name__ == "__main__":
+    main()

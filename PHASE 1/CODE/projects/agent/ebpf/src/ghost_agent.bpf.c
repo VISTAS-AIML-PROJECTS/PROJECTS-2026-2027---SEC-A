@@ -1,0 +1,1468 @@
+/*
+ * ghost_agent.bpf.c — Ghost IT Kernel eBPF Program v2
+ *
+ * Probe points implemented (21 of 47 target):
+ *
+ * CRITICAL ring (never-drop, 4MB):
+ *   sys_setuid, sys_setgid, sys_ptrace, sys_capset
+ *   sys_mmap (exec bit), sys_mprotect (exec bit)
+ *
+ * STANDARD ring (16MB, drops oldest on overflow):
+ *   sys_execve, sys_execveat, sys_clone
+ *   sys_openat, sys_openat2, sys_rename, sys_unlink, sys_chmod, sys_chown
+ *   sys_connect, sys_bind, sys_listen, sys_sendto
+ *   sys_exit_group, sys_prctl
+ *
+ * Kernel: 5.8+ (ring buffer), BTF + CO-RE required
+ *
+ * Ghost Layer Technologies — CONFIDENTIAL
+ */
+
+#include "vmlinux.h"
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
+#include <bpf/bpf_core_read.h>
+#include "ghost_agent.h"
+
+char LICENSE[] SEC("license") = "GPL";
+
+/* ------------------------------------------------------------------ */
+/* Maps                                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Critical ring — 4MB, never drops events
+ * Used for: privilege escalation, memory exec, ptrace
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 4 * 1024 * 1024);
+} critical_rb SEC(".maps");
+
+/*
+ * Standard ring — 16MB, drops oldest on overflow (self-healing)
+ * Used for: file, network, process events
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 16 * 1024 * 1024);
+} standard_rb SEC(".maps");
+
+/*
+
+ * tls_hello_rb -- separate ring buffer, only for TLS ClientHello raw
+
+ * payload capture (JA4+ fingerprinting). Kept isolated from
+
+ * critical_rb/standard_rb -- see struct tls_hello_event's comment in
+
+ * ghost_agent.h for why. 2MB is generous headroom for ~1050-byte
+
+ * events under real traffic volume.
+
+ */
+
+struct {
+
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+
+    __uint(max_entries, 2 * 1024 * 1024);
+
+} tls_hello_rb SEC(".maps");
+
+
+/*
+ * ghost_config — runtime tunables
+ * Key 0: min_uid  (ignore UIDs below this)
+ * Key 1: self_pid (ignore agent's own events)
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 8);
+    __type(key,   __u32);
+    __type(value, __u32);
+} ghost_config SEC(".maps");
+
+/*
+ * pid_blacklist — PIDs to ignore
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 256);
+    __type(key,   __u32);
+    __type(value, __u8);
+} pid_blacklist SEC(".maps");
+
+/*
+ * fd_path_cache -- maps (pid,fd) -> path, populated at open time.
+ * write() only receives a file descriptor, not a path -- resolving
+ * fd->path from inside write() would require walking
+ * task->files->fdt, expensive on every call. Instead cache the path
+ * once at open time (when the syscall genuinely carries it as an
+ * argument, via the entry/exit probe pair below) and look it up
+ * cheaply at write time. Key is packed u64: high 32 bits pid, low
+ * 32 bits fd.
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 16384);
+    __type(key,   __u64);
+    __type(value, char[64]);
+} fd_path_cache SEC(".maps");
+
+/*
+
+ * dns_fd_cache -- marks (pid,fd) pairs whose socket was connect()'d
+
+ * to port 53, so a later sendmsg()/send() on that same fd (no
+
+ * per-call address, since the socket is already connected) can be
+
+ * recognized as DNS traffic. Same packed-u64 key pattern as
+
+ * fd_path_cache above. LRU so stale entries age out automatically.
+
+ */
+
+struct {
+
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+
+    __uint(max_entries, 4096);
+
+    __type(key,   __u64);
+
+    __type(value, __u8);
+
+} dns_fd_cache SEC(".maps");
+
+/*
+
+ * tls_fd_cache -- same pattern as dns_fd_cache, marks (pid,fd) pairs
+
+ * connect()'d to port 443, so a later sendmsg()/send() on that fd
+
+ * (no per-call address, socket already connected) can be recognized
+
+ * as potential TLS handshake traffic worth inspecting for a
+
+ * ClientHello.
+
+ */
+
+struct {
+
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+
+    __uint(max_entries, 4096);
+
+    __type(key,   __u64);
+
+    __type(value, __u8);
+
+} tls_fd_cache SEC(".maps");
+
+
+
+/*
+ * openat_staging -- temporary PID->path bridge between
+ * sys_enter_openat (has the path, not the fd yet) and
+ * sys_exit_openat (has the real fd, not the path -- only the
+ * syscall's return value carries it).
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key,   __u32);
+    __type(value, char[64]);
+} openat_staging SEC(".maps");
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+static __always_inline void resolve_fd_path(int fd, char *out, __u32 out_size)
+{
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task) return;
+    struct files_struct *files = BPF_CORE_READ(task, files);
+    if (!files) return;
+    struct fdtable *fdt = BPF_CORE_READ(files, fdt);
+    if (!fdt) return;
+    struct file **fd_array = BPF_CORE_READ(fdt, fd);
+    if (!fd_array) return;
+    struct file *f = NULL;
+    bpf_probe_read_kernel(&f, sizeof(f), &fd_array[fd]);
+    if (!f) return;
+    bpf_d_path(&f->f_path, out, out_size);
+}
+
+static __always_inline void fill_common(
+    struct ghost_event *e, __u8 type, __u8 priority)
+{
+    struct task_struct *task =
+        (struct task_struct *)bpf_get_current_task();
+
+    e->timestamp_ns = bpf_ktime_get_ns();
+    e->pid          = bpf_get_current_pid_tgid() >> 32;
+    e->tgid         = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
+    e->uid          = bpf_get_current_uid_gid() & 0xFFFFFFFF;
+    e->gid          = bpf_get_current_uid_gid() >> 32;
+    e->parent_pid   = BPF_CORE_READ(task, real_parent, tgid);
+    e->event_type   = type;
+    e->priority     = priority;
+    e->flags        = 0;
+    bpf_get_current_comm(e->comm, sizeof(e->comm));
+}
+
+/* High-value events: only drop agent-self and blacklisted PIDs.
+ * NO uid filter — root-level attacks must be captured. */
+static __always_inline int should_drop(void)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u32 key, *val;
+
+    /* Drop our own agent */
+    key = 1;
+    val = bpf_map_lookup_elem(&ghost_config, &key);
+    if (val && *val && pid == *val)
+        return 1;
+
+    /* Drop blacklisted PIDs */
+    __u8 *bl = bpf_map_lookup_elem(&pid_blacklist, &pid);
+    if (bl)
+        return 1;
+
+    return 0;
+}
+
+/* Noisy events (read, write, open): apply uid filter to reduce volume.
+ * Keeps system daemon noise out while capturing user-space activity. */
+static __always_inline int should_drop_noisy(void)
+{
+    if (should_drop()) return 1;
+
+    __u32 uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
+    __u32 key = 0, *val;
+    val = bpf_map_lookup_elem(&ghost_config, &key);
+    if (val && uid < *val)
+        return 1;
+
+
+    /* Drop known high-noise zero-security-value processes */
+    char comm[16] = {};
+    bpf_get_current_comm(comm, sizeof(comm));
+    /* Firefox/Chrome renderer threads (Thread-N) */
+    if (comm[0]=='T' && comm[1]=='h' && comm[2]=='r' && comm[3]=='e' &&
+        comm[4]=='a' && comm[5]=='d' && comm[6]=='-')
+        return 1;
+    /* KMS/DRM graphics threads */
+    if (comm[0]=='K' && comm[1]=='M' && comm[2]=='S' && comm[3]==' ')
+        return 1;
+    /* gnome-shell desktop UI */
+    if (comm[0]=='g' && comm[1]=='n' && comm[2]=='o' && comm[3]=='m' &&
+        comm[4]=='e' && comm[5]=='-' && comm[6]=='s')
+        return 1;
+
+    return 0;
+}
+
+static __always_inline int is_noisy_path(const void *upath)
+{
+    char buf[12] = {};
+    bpf_probe_read_user_str(buf, sizeof(buf), upath);
+
+    if (buf[0]=='/' && buf[1]=='p' && buf[2]=='r' && buf[3]=='o' && buf[4]=='c')
+        return 1;
+    if (buf[0]=='/' && buf[1]=='s' && buf[2]=='y' && buf[3]=='s')
+        return 1;
+    if (buf[0]=='/' && buf[1]=='d' && buf[2]=='e' && buf[3]=='v' &&
+        buf[4]=='/' && buf[5]=='m' && buf[6]=='e' && buf[7]=='m')
+        return 0;
+    if (buf[0]=='/' && buf[1]=='d' && buf[2]=='e' && buf[3]=='v' && buf[4]=='/')
+        return 1;
+    if (buf[0]=='/' && buf[1]=='\0')
+        return 1;
+    return 0;
+}
+
+/* Reserve from correct ring based on priority */
+#define RESERVE(priority) \
+    ((priority) == PRIORITY_CRITICAL \
+        ? bpf_ringbuf_reserve(&critical_rb,  sizeof(struct ghost_event), 0) \
+        : bpf_ringbuf_reserve(&standard_rb, sizeof(struct ghost_event), 0))
+
+/* ================================================================== */
+/* CRITICAL RING — PRIVILEGE PROBES                                   */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_setuid")
+int handle_setuid(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_SETUID, PRIORITY_CRITICAL);
+    e->flags = (__u16)ctx->args[0]; /* new UID */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_setgid")
+int handle_setgid(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_SETGID, PRIORITY_CRITICAL);
+    e->flags = (__u16)ctx->args[0]; /* new GID */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_ptrace")
+int handle_ptrace(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_PTRACE, PRIORITY_CRITICAL);
+    e->flags = (__u16)ctx->args[0]; /* ptrace request */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_capset")
+int handle_capset(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_CAPSET, PRIORITY_CRITICAL);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* CRITICAL RING — MEMORY EXEC PROBES                                 */
+/* ================================================================== */
+
+#define PROT_EXEC 0x4
+#define MAP_ANON  0x20
+
+static __always_inline int is_jit_process(void)
+{
+    char comm[16] = {};
+    bpf_get_current_comm(comm, sizeof(comm));
+    /* Filter known JIT processes that generate excessive mprotect/mmap_exec events */
+    if (comm[0]=='g' && comm[1]=='n' && comm[2]=='o' && comm[3]=='m') return 1; /* gnome-* */
+    if (comm[0]=='X' && comm[1]=='w' && comm[2]=='a' && comm[3]=='y') return 1; /* Xwayland */
+    if (comm[0]=='f' && comm[1]=='i' && comm[2]=='r' && comm[3]=='e') return 1; /* firefox */
+    if (comm[0]=='c' && comm[1]=='h' && comm[2]=='r' && comm[3]=='o') return 1; /* chrome */
+    if (comm[0]=='j' && comm[1]=='a' && comm[2]=='v' && comm[3]=='a') return 1; /* java */
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_mmap")
+int handle_mmap(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    /* Only care about executable mappings */
+    __u64 prot  = (__u64)ctx->args[2];
+    __u64 flags = (__u64)ctx->args[3];
+
+    if (!(prot & PROT_EXEC)) return 0;
+
+    /* Skip JIT processes — they generate hundreds of mmap_exec per minute */
+    if (is_jit_process()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_MMAP_EXEC, PRIORITY_STANDARD);
+    e->flags = (__u16)(prot | (flags << 8));
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_mprotect")
+int handle_mprotect(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    __u64 prot = (__u64)ctx->args[2];
+    if (!(prot & PROT_EXEC)) return 0;
+
+    /* Skip JIT processes — they flood the critical ring */
+    if (is_jit_process()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_MPROTECT, PRIORITY_STANDARD);
+    e->flags = (__u16)prot;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* STANDARD RING — PROCESS PROBES                                     */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_execve")
+int handle_execve(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) {
+        return 0;
+    }
+
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) {
+        return 0;
+    }
+
+    fill_common(e, EVENT_EXEC, PRIORITY_CRITICAL);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[0]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_execveat")
+int handle_execveat(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_EXEC, PRIORITY_CRITICAL);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[1]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_clone")
+int handle_clone(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_CLONE, PRIORITY_STANDARD);
+    e->flags = (__u16)((__u64)ctx->args[0] & 0xFFFF);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_exit_group")
+int handle_exit_group(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_EXIT, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[0]; /* exit code */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_prctl")
+int handle_prctl(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_PRCTL, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[0]; /* prctl option */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* STANDARD RING — FILE PROBES                                        */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_openat")
+int handle_openat(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop_noisy()) return 0;
+
+    char path[16] = {};
+    bpf_probe_read_user_str(path, sizeof(path), (const void *)(long)ctx->args[1]);
+    if (is_noisy_path((const void *)(long)ctx->args[1])) return 0;
+
+    /* Elevate /tmp and /dev/shm opens to critical ring — never dropped */
+    __u8 priority = PRIORITY_STANDARD;
+    if (path[0]=='/' && path[1]=='t' && path[2]=='m' && path[3]=='p')
+        priority = PRIORITY_CRITICAL;
+    if (path[0]=='/' && path[1]=='d' && path[2]=='e' && path[3]=='v' &&
+        path[4]=='/' && path[5]=='s' && path[6]=='h' && path[7]=='m')
+        priority = PRIORITY_CRITICAL;
+
+    {
+        char staged_path[64] = {};
+        bpf_probe_read_user_str(staged_path, sizeof(staged_path),
+                                (const void *)(long)ctx->args[1]);
+        __u32 pid = bpf_get_current_pid_tgid() >> 32;
+        bpf_map_update_elem(&openat_staging, &pid, staged_path, BPF_ANY);
+    }
+    struct ghost_event *e = RESERVE(priority);
+    if (!e) return 0;
+    fill_common(e, EVENT_OPEN, priority);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[1]);
+    e->flags = (__u16)ctx->args[2];
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_exit_openat")
+int handle_openat_exit(struct trace_event_raw_sys_exit *ctx)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    char *staged_path = bpf_map_lookup_elem(&openat_staging, &pid);
+    if (!staged_path) return 0;
+    long ret = ctx->ret;
+    bpf_map_delete_elem(&openat_staging, &pid);
+    if (ret < 0) return 0;
+    __u64 fd_key = ((__u64)pid << 32) | (__u32)ret;
+    bpf_map_update_elem(&fd_path_cache, &fd_key, staged_path, BPF_ANY);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_openat2")
+int handle_openat2(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    if (is_noisy_path((const void *)(long)ctx->args[1])) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_OPENAT2, PRIORITY_STANDARD);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[1]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_unlink")
+int handle_unlink(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_UNLINK, PRIORITY_STANDARD);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[0]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_rename")
+int handle_rename(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_RENAME, PRIORITY_STANDARD);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[1]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+SEC("tp/syscalls/sys_enter_renameat2")
+int handle_renameat2(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_RENAME, PRIORITY_STANDARD);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[3]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+SEC("tp/syscalls/sys_enter_renameat")
+int handle_renameat(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_RENAME, PRIORITY_STANDARD);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[3]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_chmod")
+int handle_chmod(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_CHMOD, PRIORITY_STANDARD);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[0]);
+    e->flags = (__u16)ctx->args[1]; /* mode */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_chown")
+int handle_chown(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_CHOWN, PRIORITY_STANDARD);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)(long)ctx->args[0]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* STANDARD RING — NETWORK PROBES                                     */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_connect")
+int handle_connect(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_CONNECT, PRIORITY_STANDARD);
+
+    struct sockaddr_in addr = {};
+    bpf_probe_read_user(&addr, sizeof(addr), (const void *)(long)ctx->args[1]);
+    e->flags = addr.sin_family;
+
+    /* Only encode IP:port for AF_INET (2) — skip AF_UNIX */
+    if (addr.sin_family == 2) {
+        __u8 *ip_bytes = (__u8 *)&addr.sin_addr.s_addr;
+        __u16 port = __builtin_bswap16(addr.sin_port);
+        e->path[0] = ip_bytes[0];
+        e->path[1] = ip_bytes[1];
+        e->path[2] = ip_bytes[2];
+        e->path[3] = ip_bytes[3];
+        e->path[4] = (port >> 8) & 0xFF;
+        e->path[5] = port & 0xFF;
+
+        if (port == 53) {
+
+            __u64 fd_key = ((__u64)(bpf_get_current_pid_tgid() >> 32) << 32) | (__u32)ctx->args[0];
+
+            __u8 mark = 1;
+
+            bpf_map_update_elem(&dns_fd_cache, &fd_key, &mark, BPF_ANY);
+        }
+        if (port == 443) {
+            __u64 fd_key443 = ((__u64)(bpf_get_current_pid_tgid() >> 32) << 32) | (__u32)ctx->args[0];
+            __u8 mark443 = 1;
+            bpf_map_update_elem(&tls_fd_cache, &fd_key443, &mark443, BPF_ANY);
+
+        }
+
+    }
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_bind")
+int handle_bind(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_BIND, PRIORITY_STANDARD);
+    struct sockaddr_in addr = {};
+    bpf_probe_read_user(&addr, sizeof(addr), (const void *)(long)ctx->args[1]);
+    e->flags = addr.sin_family;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_listen")
+int handle_listen(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+
+    fill_common(e, EVENT_LISTEN, PRIORITY_STANDARD);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* PROCESS — fork, vfork                                              */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_fork")
+int handle_fork(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_FORK, PRIORITY_STANDARD);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_vfork")
+int handle_vfork(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_VFORK, PRIORITY_STANDARD);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* FILE — read, write                                                  */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_read")
+int handle_read(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop_noisy()) return 0;
+
+    int fd = (int)ctx->args[0];
+    if (fd <= 2) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_READ, PRIORITY_STANDARD);
+    {
+        __u32 pid = bpf_get_current_pid_tgid() >> 32;
+        __u64 fd_key = ((__u64)pid << 32) | (__u32)fd;
+        char *cached_path = bpf_map_lookup_elem(&fd_path_cache, &fd_key);
+        if (cached_path) {
+            bpf_probe_read_kernel_str(e->path, sizeof(e->path), cached_path);
+        }
+    }
+    e->flags = (__u16)fd;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_write")
+int handle_write(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop_noisy()) return 0;
+
+    int fd = (int)ctx->args[0];
+    if (fd <= 2) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_WRITE, PRIORITY_STANDARD);
+    /* Resolve the write's actual path via the fd cache populated at
+     * open time -- write() only carries the fd, not a path, so this
+     * lookup is what makes file_write events path-aware instead of
+     * always having path=NULL (confirmed root cause of
+     * C4-WATCHLIST-E2E-UNVERIFIED-01's inotify-path limitation --
+     * this is the more robust, kernel-level fix). */
+    {
+        __u32 pid = bpf_get_current_pid_tgid() >> 32;
+        __u64 fd_key = ((__u64)pid << 32) | (__u32)fd;
+        char *cached_path = bpf_map_lookup_elem(&fd_path_cache, &fd_key);
+        if (cached_path) {
+            bpf_probe_read_kernel_str(e->path, sizeof(e->path), cached_path);
+        }
+    }
+    e->flags = (__u16)fd;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* NETWORK — sendto, recvfrom, sendmsg, recvmsg                      */
+/* ================================================================== */
+
+
+
+
+/* ================================================================== */
+
+/* DNS QUERY CAPTURE — for C14 DNS/DGA analysis                        */
+
+/* Parses the QNAME out of a DNS query written via sendto() to a UDP   */
+
+/* socket on port 53. Real, bounded, verifier-safe parsing: reads a    */
+
+/* fixed 128-byte window of the payload into a stack buffer first (no  */
+
+/* unbounded user-memory access), then walks it with a fixed, unrolled */
+
+/* loop (max 16 labels) reconstructing "label.label.label" into        */
+
+/* e->path. Truncates cleanly on anything malformed or too long rather */
+
+/* than risk any out-of-bounds read under the verifier.                */
+
+/* ================================================================== */
+
+#define DNS_BUF_LEN 128
+
+static __always_inline void try_parse_dns_query(struct ghost_event *e, const void *payload, __u64 paylen)
+
+{
+
+    if (paylen < 13 || paylen > DNS_BUF_LEN) return; /* too small or too big for our fixed window */
+
+    char buf[DNS_BUF_LEN] = {};
+
+    if (bpf_probe_read_user(buf, DNS_BUF_LEN, payload) != 0) return;
+
+    /* DNS header is 12 bytes; QNAME starts at offset 12 */
+
+    int pos = 12;
+
+    int out = 0;
+
+    #pragma unroll
+
+    for (int label = 0; label < 16; label++) {
+
+        if (pos >= DNS_BUF_LEN - 1 || out >= 62) break;
+
+        __u8 len = (__u8)buf[pos];
+
+        if (len == 0) break;              /* end of QNAME */
+
+        if (len > 63) break;              /* invalid label length -- not real DNS, bail */
+
+        pos++;
+
+        #pragma unroll
+
+        for (int i = 0; i < 63; i++) {
+
+            if (i >= len) break;
+
+            if (pos >= DNS_BUF_LEN - 1 || out >= 62) break;
+
+            e->path[out] = buf[pos];
+
+            out++; pos++;
+
+        }
+
+        if (out < 62) { e->path[out] = '.'; out++; }
+
+    }
+
+    if (out > 0 && e->path[out-1] == '.') out--; /* trim trailing dot */
+
+    e->path[out] = '\0';
+
+}
+
+SEC("tp/syscalls/sys_enter_sendto")
+int handle_sendto(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_SENDTO, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[0]; /* fd */
+
+    /* Read destination address if provided */
+    const void *addr = (const void *)ctx->args[4];
+    if (addr) {
+        struct sockaddr_in sa = {};
+        bpf_probe_read_user(&sa, sizeof(sa), addr);
+        e->path[0] = sa.sin_addr.s_addr & 0xFF;
+        e->path[1] = (sa.sin_addr.s_addr >> 8) & 0xFF;
+        e->path[2] = (sa.sin_addr.s_addr >> 16) & 0xFF;
+        e->path[3] = (sa.sin_addr.s_addr >> 24) & 0xFF;
+    }
+
+    bpf_ringbuf_submit(e, 0);
+
+    /* Separate, additional DNS-specific event -- doesn't touch the
+
+       generic sendto event above, purely additive. */
+
+    if (addr) {
+
+        struct sockaddr_in sa2 = {};
+
+        bpf_probe_read_user(&sa2, sizeof(sa2), addr);
+
+        if (__builtin_bswap16(sa2.sin_port) == 53) {
+
+            struct ghost_event *de = RESERVE(PRIORITY_STANDARD);
+
+            if (de) {
+
+                fill_common(de, EVENT_DNS_QUERY, PRIORITY_STANDARD);
+
+                const void *msg = (const void *)ctx->args[1];
+
+                __u64 msglen = (__u64)ctx->args[2];
+
+                if (msg) try_parse_dns_query(de, msg, msglen);
+
+                bpf_ringbuf_submit(de, 0);
+
+            }
+
+        }
+
+    }
+
+    /* TLS ClientHello capture via sendto() -- real applications vary:
+       dig's DNS resolver used sendmsg(), but curl's TLS library uses
+       sendto() with a NULL address (socket already connect()'d) for
+       its handshake writes -- confirmed via strace, not assumed.
+       Same tls_fd_cache lookup as the sendmsg-side capture, just
+       reading args[1]/args[2] directly instead of via msghdr, since
+       sendto's buffer+length are direct syscall arguments. */
+    __u64 tls_fd_key = ((__u64)(bpf_get_current_pid_tgid() >> 32) << 32) | (__u32)ctx->args[0];
+    __u8 *tls_marked2 = bpf_map_lookup_elem(&tls_fd_cache, &tls_fd_key);
+    if (tls_marked2) {
+        const void *sendto_buf = (const void *)ctx->args[1];
+        __u64 sendto_len = (__u64)ctx->args[2];
+        if (sendto_buf && sendto_len >= 6) {
+            __u8 first_byte2 = 0;
+            if (bpf_probe_read_user(&first_byte2, 1, sendto_buf) == 0 && first_byte2 == 0x16) {
+                __u16 cap_len2 = (sendto_len > TLS_HELLO_MAX_LEN) ? TLS_HELLO_MAX_LEN : (__u16)sendto_len;
+                struct tls_hello_event *te2 = bpf_ringbuf_reserve(&tls_hello_rb, sizeof(struct tls_hello_event), 0);
+                if (te2) {
+                    te2->timestamp_ns = bpf_ktime_get_ns();
+                    te2->pid = bpf_get_current_pid_tgid() >> 32;
+                    te2->uid = bpf_get_current_uid_gid();
+                    bpf_get_current_comm(&te2->comm, sizeof(te2->comm));
+                    te2->dst_port = 443;
+                    te2->hello_len = cap_len2;
+                    if (bpf_probe_read_user(te2->hello, cap_len2, sendto_buf) != 0) {
+                        te2->hello_len = 0;
+                    }
+                    bpf_ringbuf_submit(te2, 0);
+                }
+            }
+        }
+    }
+    return 0;
+
+}
+SEC("tp/syscalls/sys_enter_recvfrom")
+int handle_recvfrom(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_RECVFROM, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[0]; /* fd */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_sendmsg")
+
+int handle_sendmsg(struct trace_event_raw_sys_enter *ctx)
+
+{
+
+    if (should_drop()) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+
+    if (!e) return 0;
+
+    fill_common(e, EVENT_SENDMSG, PRIORITY_STANDARD);
+
+    e->flags = (__u16)ctx->args[0]; /* fd */
+
+    bpf_ringbuf_submit(e, 0);
+
+    /* Separate, additional DNS event -- only if this fd was seen
+
+       connect()'d to port 53 earlier (handle_connect marks it).
+
+       Reads struct user_msghdr by raw offset rather than a struct
+
+       definition, since msghdr/iovec aren't guaranteed present in
+
+       vmlinux.h (they're UAPI types, not always in kernel BTF) --
+
+       same defensive style already used for sockaddr_in elsewhere
+
+       in this file. Layout (x86-64 LP64 ABI):
+
+         offset 0:  void *msg_name
+
+         offset 8:  int msg_namelen (+ padding)
+
+         offset 16: struct iovec *msg_iov
+
+         offset 24: size_t msg_iovlen
+
+       struct iovec: { void *iov_base; size_t iov_len; } -- 16 bytes. */
+
+    __u64 fd_key = ((__u64)(bpf_get_current_pid_tgid() >> 32) << 32) | (__u32)ctx->args[0];
+
+    __u8 *marked = bpf_map_lookup_elem(&dns_fd_cache, &fd_key);
+
+    if (marked) {
+
+        const void *msghdr_ptr = (const void *)ctx->args[1];
+
+        __u64 msg_iov_ptr = 0;
+
+        if (bpf_probe_read_user(&msg_iov_ptr, sizeof(msg_iov_ptr), msghdr_ptr + 16) == 0 && msg_iov_ptr) {
+
+            __u64 iov_base = 0, iov_len = 0;
+
+            if (bpf_probe_read_user(&iov_base, sizeof(iov_base), (const void *)msg_iov_ptr) == 0 &&
+
+                bpf_probe_read_user(&iov_len, sizeof(iov_len), (const void *)(msg_iov_ptr + 8)) == 0 &&
+
+                iov_base) {
+
+                struct ghost_event *de = RESERVE(PRIORITY_STANDARD);
+
+                if (de) {
+
+                    fill_common(de, EVENT_DNS_QUERY, PRIORITY_STANDARD);
+
+                    try_parse_dns_query(de, (const void *)iov_base, iov_len);
+
+                    bpf_ringbuf_submit(de, 0);
+
+                }
+
+            }
+
+        }
+
+    }
+
+    /* TLS ClientHello capture (JA4+) -- same fd-marking pattern as
+
+       DNS above, but for tls_fd_cache (port 443). Reserves directly
+
+       into tls_hello_rb sized for the ACTUAL bytes read (variable,
+
+       up to TLS_HELLO_MAX_LEN), not a fixed-size struct like
+
+       ghost_event -- this is why it needs its own reserve call
+
+       instead of the RESERVE() macro, which only handles the fixed
+
+       sizeof(struct ghost_event) case. */
+
+    __u8 *tls_marked = bpf_map_lookup_elem(&tls_fd_cache, &fd_key);
+
+    if (tls_marked) {
+
+        const void *tls_msghdr_ptr = (const void *)ctx->args[1];
+
+        __u64 tls_iov_ptr = 0;
+
+        if (bpf_probe_read_user(&tls_iov_ptr, sizeof(tls_iov_ptr), tls_msghdr_ptr + 16) == 0 && tls_iov_ptr) {
+
+            __u64 tls_iov_base = 0, tls_iov_len = 0;
+
+            if (bpf_probe_read_user(&tls_iov_base, sizeof(tls_iov_base), (const void *)tls_iov_ptr) == 0 &&
+
+                bpf_probe_read_user(&tls_iov_len, sizeof(tls_iov_len), (const void *)(tls_iov_ptr + 8)) == 0 &&
+
+                tls_iov_base && tls_iov_len >= 6) {
+
+                /* Peek first byte before committing a ring-buffer
+
+                   reservation -- only real TLS handshake records
+
+                   (content type 0x16) worth capturing. Avoids
+
+                   reserving+immediately-discarding for the vast
+
+                   majority of port-443 traffic that isn't a fresh
+
+                   ClientHello (session resumption, application data,
+
+                   etc). */
+
+                __u8 first_byte = 0;
+
+                if (bpf_probe_read_user(&first_byte, 1, (const void *)tls_iov_base) == 0 && first_byte == 0x16) {
+
+                    __u16 cap_len = (tls_iov_len > TLS_HELLO_MAX_LEN) ? TLS_HELLO_MAX_LEN : (__u16)tls_iov_len;
+
+                    struct tls_hello_event *te = bpf_ringbuf_reserve(&tls_hello_rb, sizeof(struct tls_hello_event), 0);
+
+                    if (te) {
+
+                        te->timestamp_ns = bpf_ktime_get_ns();
+
+                        te->pid = bpf_get_current_pid_tgid() >> 32;
+
+                        te->uid = bpf_get_current_uid_gid();
+
+                        bpf_get_current_comm(&te->comm, sizeof(te->comm));
+
+                        te->dst_port = 443;
+
+                        te->hello_len = cap_len;
+
+                        if (bpf_probe_read_user(te->hello, cap_len, (const void *)tls_iov_base) != 0) {
+
+                            te->hello_len = 0; /* read failed -- still submit, Rust side checks hello_len */
+
+                        }
+
+                        bpf_ringbuf_submit(te, 0);
+
+                    }
+
+                }
+
+            }
+
+        }
+
+    }
+
+
+    return 0;
+
+}
+SEC("tp/syscalls/sys_enter_recvmsg")
+int handle_recvmsg(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_RECVMSG, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[0]; /* fd */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* AUTH — setreuid, setregid, setns (critical ring)                   */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_setreuid")
+int handle_setreuid(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+    fill_common(e, EVENT_SETREUID, PRIORITY_CRITICAL);
+    e->flags = (__u16)ctx->args[1]; /* effective UID */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_setregid")
+int handle_setregid(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+    fill_common(e, EVENT_SETREGID, PRIORITY_CRITICAL);
+    e->flags = (__u16)ctx->args[1]; /* effective GID */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_setns")
+int handle_setns(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+    fill_common(e, EVENT_SETNS, PRIORITY_CRITICAL);
+    e->flags = (__u16)ctx->args[1]; /* nstype */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* CRYPTO — entropy reads (/dev/urandom watch)                        */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_openat")
+int handle_entropy_watch(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+
+    char path[16] = {};
+    bpf_probe_read_user_str(path, sizeof(path), (const void *)ctx->args[1]);
+
+    /* Only fire for /dev/urandom and /dev/random */
+    int is_urandom = (path[0]=='/' && path[1]=='d' && path[2]=='e' &&
+                      path[3]=='v' && path[4]=='/' && path[5]=='u');
+    int is_random  = (path[0]=='/' && path[1]=='d' && path[2]=='e' &&
+                      path[3]=='v' && path[4]=='/' && path[5]=='r');
+
+    if (!is_urandom && !is_random) return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_ENTROPY_READ, PRIORITY_STANDARD);
+    bpf_probe_read_user_str(e->path, sizeof(e->path),
+                            (const void *)ctx->args[1]);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* LSM HOOKS — capability + file open                                 */
+/* ================================================================== */
+
+SEC("lsm/capable")
+int BPF_PROG(ghost_cap_check, const struct cred *cred,
+             struct user_namespace *ns, int cap, unsigned int opts)
+{
+    if (should_drop()) return 0;
+
+    /* Only track sensitive capabilities */
+    if (cap != 0  &&  /* CAP_CHOWN */
+        cap != 1  &&  /* CAP_DAC_OVERRIDE */
+        cap != 6  &&  /* CAP_SETUID */
+        cap != 7  &&  /* CAP_SETGID */
+        cap != 21 &&  /* CAP_SYS_ADMIN */
+        cap != 22)    /* CAP_SYS_BOOT */
+        return 0;
+
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+    fill_common(e, EVENT_CAP_CHECK, PRIORITY_CRITICAL);
+    e->flags = (__u16)cap;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("lsm/file_open")
+int BPF_PROG(ghost_lsm_file_open, struct file *file)
+{
+    if (should_drop()) return 0;
+
+    /* Only track opens on sensitive paths */
+    struct dentry *dentry = BPF_CORE_READ(file, f_path.dentry);
+    struct dentry *parent = BPF_CORE_READ(dentry, d_parent);
+
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_LSM_OPEN, PRIORITY_STANDARD);
+
+    /* Read filename */
+    const unsigned char *name = BPF_CORE_READ(dentry, d_name.name);
+    if (name)
+        bpf_probe_read_kernel_str(e->path, sizeof(e->path), name);
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+/* ================================================================== */
+/* NEW PROBES — fd, signal, network kprobes, LSM, perf               */
+/* ================================================================== */
+
+SEC("tp/syscalls/sys_enter_socket")
+int handle_socket(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_SOCKET, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[0]; /* domain */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_accept4")
+int handle_accept4(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_ACCEPT4, PRIORITY_STANDARD);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_dup2")
+int handle_dup2(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_DUP2, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[1]; /* newfd */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_dup3")
+int handle_dup3(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_DUP3, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[1]; /* newfd */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_kill")
+int handle_kill(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_KILL, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[1]; /* signal */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_tgkill")
+int handle_tgkill(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_TGKILL, PRIORITY_STANDARD);
+    e->flags = (__u16)ctx->args[2]; /* signal */
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("kprobe/tcp_connect")
+int BPF_KPROBE(handle_tcp_connect, struct sock *sk)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_TCP_CONNECT, PRIORITY_STANDARD);
+
+    /* Extract destination IP and port from sock struct via CO-RE */
+    __u32 daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+    __u16 dport = BPF_CORE_READ(sk, __sk_common.skc_dport);
+
+    /* Store as A.B.C.D:PORT raw bytes in path — decoded by Rust events.rs */
+    __u8 a = daddr & 0xFF;
+    __u8 b = (daddr >> 8)  & 0xFF;
+    __u8 c = (daddr >> 16) & 0xFF;
+    __u8 d = (daddr >> 24) & 0xFF;
+    __u16 port = __builtin_bswap16(dport);
+
+    e->path[0] = a; e->path[1] = b;
+    e->path[2] = c; e->path[3] = d;
+    e->path[4] = (port >> 8) & 0xFF;
+    e->path[5] = port & 0xFF;
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("kprobe/inet_csk_accept")
+int BPF_KPROBE(handle_tcp_accept, struct sock *sk)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_TCP_ACCEPT, PRIORITY_STANDARD);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("kprobe/tcp_close")
+int BPF_KPROBE(handle_tcp_close, struct sock *sk)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_TCP_CLOSE, PRIORITY_STANDARD);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("kprobe/udp_sendmsg")
+int BPF_KPROBE(handle_udp_send, struct sock *sk)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_UDP_SEND, PRIORITY_STANDARD);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("kprobe/udp_recvmsg")
+int BPF_KPROBE(handle_udp_recv, struct sock *sk)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_UDP_RECV, PRIORITY_STANDARD);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+// DISABLED V0 — too noisy, re-enable in V1 with path filtering
+// SEC("lsm/inode_permission")
+__attribute__((unused))
+static int handle_inode_perm_disabled(struct inode *inode, int mask)
+{
+    if (should_drop()) return 0;
+    /* Only care about write/exec permission checks */
+    if (!(mask & 0x2) && !(mask & 0x1)) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_STANDARD);
+    if (!e) return 0;
+    fill_common(e, EVENT_INODE_PERM, PRIORITY_STANDARD);
+    e->flags = (__u16)mask;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/syscalls/sys_enter_perf_event_open")
+int handle_perf_open(struct trace_event_raw_sys_enter *ctx)
+{
+    if (should_drop()) return 0;
+    struct ghost_event *e = RESERVE(PRIORITY_CRITICAL);
+    if (!e) return 0;
+    fill_common(e, EVENT_PERF_OPEN, PRIORITY_CRITICAL);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}

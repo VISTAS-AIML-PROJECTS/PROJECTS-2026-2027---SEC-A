@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY deception/canary/ ./deception/canary/
+COPY deception/mtd/ ./deception/mtd/
+COPY causal-engine/ ./causal-engine/
+RUN pip install --no-cache-dir duckdb
+ENV CORTEX_DB_PATH=/data/cortex.duckdb
+ENV TEMPORAL_DB_PATH=/data/temporal_memory.duckdb
+ENV THRESHOLDS_DB_PATH=/data/adaptive_thresholds.duckdb
+ENV RESPONSE_DB_PATH=/data/autonomous_response.duckdb
+# SAFETY: simulation mode by default -- decisions logged, no real
+# action executed, until explicitly enabled after a real observation period.
+ENV GHOSTIT_AUTONOMOUS_ACTIONS_ENABLED=false
+ENV MESH_DB_PATH=/data/threat_mesh.duckdb
+ENV GHOSTIT_DEPLOYMENT_ID=keerthivahanan-cloud-mumbai
+ENV WORLDMODEL_DB_PATH=/data/world_model.duckdb
+ENV REPLAY_DB_PATH=/data/attack_replay.duckdb
+ENV EVOLUTION_DB_PATH=/data/self_evolution.duckdb
+
+CMD ["python3", "deception/canary/server.py", \
+     "--http-port", "8080", \
+     "--pipeline-host", "pipeline", \
+     "--pipeline-port", "9000"]
